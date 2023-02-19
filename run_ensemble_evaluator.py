@@ -13,6 +13,7 @@ from copy import deepcopy
 from glob import glob
 
 # import dependencies
+from matplotlib import pyplot as plt
 import pandas as pd
 import Bio
 import Bio.PDB
@@ -23,6 +24,7 @@ from scipy.spatial.transform import Rotation as R
 # import custom modules
 import utils.helix_randomization_tools as helix_randomization_tools
 from models.riff_diff_models import *
+import utils.plotting as plots
 
 ########### Collecting Unique Elements from DF #######################
 def extract_unique_frags_from_dict(input_dict: dict):
@@ -703,6 +705,10 @@ def main(args):
 
     # Concatenate with path_df:
     full_path_df = pd.concat([path_plddt_df, path_fragment_df.add_prefix("fragment_"), path_identity_df, path_rotprob_df], axis=1)
+    
+    # calculate stats for plotting:
+    full_path_df["mean_distance"] = full_path_df[[col for col in full_path_df.columns if "distance" in col]].mean(axis=1)
+    full_path_df["mean_linker_length"] = full_path_df[[col for col in full_path_df.columns if col.endswith("_linker")]].mean(axis=1)
 
     # normalize and combine rotamer probability with structure quality for filtering:
     full_path_df = normalize_col(full_path_df, "mean_rotprob")
@@ -716,6 +722,29 @@ def main(args):
     logging.info(f"Filtered {len(path_plddt_df)-len(top_path_df)} paths with quality scores below {0.05}")
     calc_path_mean_plddt(top_path_df)
     top_path_df = top_path_df.sort_values(by="rotprob_and_quality", ascending=False).head(args.max_num)
+
+    ##################### Plotting #########################################################
+    if not os.path.isdir((plotdir := f"{args.output_dir}/plots")): os.makedirs(plotdir, exist_ok=True)
+
+    # plot predicted plddts and predicted RMSDs:
+    dat = [preds_rescaled, rmsds_rescaled]
+    titles = ["Predicted pLDDTs", "Predicted RMSDs"]
+    labels = ["pLDDT [AU]", "RMSD [\u00C5]"]
+    dims = [(0,1), (0,1)] 
+    plotpath = f"{plotdir}/predictions.png"
+    logging.info(f"Plotting predicted plddts and rmsds at {plotpath}")
+    plots.violinplot_multiple_lists(lists=dat, titles=titles, y_labels=labels, dims=dims, out_path=plotpath)
+
+    # plot all paths vs. top paths
+    plotpath = f"{plotdir}/filter_stats.png"
+    logging.info(f"Plotting statistics of filtered paths at {plotpath}")
+    dfs = [full_path_df, top_path_df]
+    df_names = ["All Paths", "Selected Paths"]
+    cols = ["mean_quality", "mean_rotprob", "mean_distance", "mean_linker_length"]
+    col_names = ["Structure Quality", "Rotamer Probability", "Average Distance", "Average Linker Length"]
+    y_labels = ["Quality Score [AU]", "Probability [%]", "Distance [\u00C5]", "Number of Residues"]
+    dims = [(0, 0.3), (0, 100), None, None]
+    _ = plots.violinplot_multiple_cols_dfs(dfs, df_names=df_names, cols=cols, titles=col_names, y_labels=y_labels, dims=dims, out_path=plotpath)
 
     ##################### PDB-FILE Reassembly ##############################################
     # sanity

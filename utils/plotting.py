@@ -1,4 +1,11 @@
 ##################################### PLOTTING ###########################################################
+from matplotlib import pyplot as plt
+from matplotlib import rc
+import matplotlib.patches as mpatches
+import matplotlib.colors as mcolors
+
+import numpy as np
+
 def singular_violinplot(data: list, y_label: str, title: str, out_path:str=None,) -> None:
     '''AAA'''
     fig, ax = plt.subplots(figsize=(2,5))
@@ -50,7 +57,7 @@ def violinplot_multiple_cols_dfs(dfs, df_names, cols, titles, y_labels, dims=Non
         ax.set_title(name, size=15, y=1.05)
         ax.set_ylabel(label, size=15)
         ax.set_xticks([])
-        data = [df[col].to_list() for df in df_list]
+        data = [df[col].to_list() for df in dfs]
         parts = ax.violinplot([df[col].to_list() for df in dfs], widths=0.5)
         if dim: ax.set_ylim(dim)
         set_violinstyle(parts, colors=colors)
