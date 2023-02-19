@@ -1,0 +1,1 @@
+sbatch -J ens_env -e ensenv.err -o ensenv.out ~/ensemble_evaluator/run_ensemble_evaluator.py --input_dir inputs/mo6_h7_flip/ --output_dir mo6_h7_flip

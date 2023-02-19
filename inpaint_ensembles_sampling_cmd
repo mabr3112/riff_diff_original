@@ -1,0 +1,1 @@
+sbatch -J ensemble_inpaint -e ei.err -o ei.out ./inpaint_ensembles_sampling.py --input_dir mo6_h7_flip/ --output_dir mo6_h7_run2_flip --num_mpnn_inputs 5 --num_esm_inputs 5 --num_inpaints 20
