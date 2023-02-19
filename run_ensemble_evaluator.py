@@ -356,6 +356,17 @@ def filter_paths(path_df, min_quality:float=0.01, max_linker_length:int=5):
     
     return f2_path_df
 
+def sample_from_path_df(df: pd.DataFrame, n: int, random_sample_subset_fraction:float=1.0):
+    ''''''
+    if random_sample_subset_fraction:
+        # take subset (if fraction is 1, subset = full set!!)
+        subset_df = df.sort_values(by="rotprob_and_quality", ascending=False).head(int(round(len(df)*random_sample_subset_fraction)))
+        out_size = np.min([n, len(subset_df)])
+        sampled_df = subset_df.sample(out_size)
+    else:
+        sampled_df = df.sort_values(by="rotprob_and_quality", ascending=False).head(n)
+    return sampled_df
+
 ######################### PDB-File Reassembly #####################################################
 def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict):
     '''AAA'''
@@ -714,14 +725,18 @@ def main(args):
     full_path_df = normalize_col(full_path_df, "mean_rotprob")
     full_path_df = normalize_col(full_path_df, "mean_quality")
     full_path_df["rotprob_and_quality"] = full_path_df["mean_rotprob_normalized"] * args.weight_rotprob + full_path_df["mean_quality_normalized"] * args.weight_structure_quality
+    full_path_df["mean_quality_adjusted"] = full_path_df["mean_quality"] + args.plddt_threshold
 
-    # filter For paths with min_plddt and max_linker_length and add mean_plddt over all linkers:
+    # Remove Paths from Path DataFrame that have a quality score of 0, ore have linker distance and linker length above the specified threshold
     path_plddt_df = full_path_df[full_path_df[[col for col in full_path_df.columns if col.endswith("distance")]].max(axis=1) < args.max_linker_distance]
     logging.info(f"Filtered {len(full_path_df) - len(path_plddt_df)} paths with linker distance higher than {args.max_linker_distance}")
-    top_path_df = filter_paths(path_plddt_df, min_quality=0.05, max_linker_length=args.max_linker_length)
-    logging.info(f"Filtered {len(path_plddt_df)-len(top_path_df)} paths with quality scores below {0.05}")
-    calc_path_mean_plddt(top_path_df)
-    top_path_df = top_path_df.sort_values(by="rotprob_and_quality", ascending=False).head(args.max_num)
+    top_path_df = filter_paths(path_plddt_df, min_quality=0.0000000000001, max_linker_length=args.max_linker_length)
+    logging.info(f"Filtered {len(path_plddt_df)-len(top_path_df)} paths with quality scores of ~0")
+    #calc_path_mean_plddt(top_path_df)
+
+    # Extract top (args.max_num) rows from the filtered Path DataFrame.
+    selected_path_df = sample_from_path_df(top_path_df, n=args.max_num, random_sample_subset_fraction=args.sample_from_subset_fraction)
+    logging.info(f"Selected {len(selected_path_df)} paths from Path DataFrame.")
 
     ##################### Plotting #########################################################
     if not os.path.isdir((plotdir := f"{args.output_dir}/plots")): os.makedirs(plotdir, exist_ok=True)
@@ -735,39 +750,45 @@ def main(args):
     logging.info(f"Plotting predicted plddts and rmsds at {plotpath}")
     plots.violinplot_multiple_lists(lists=dat, titles=titles, y_labels=labels, dims=dims, out_path=plotpath)
 
-    # plot all paths vs. top paths
+    # plot all paths vs. paths with quality score >0 vs. selected paths:
     plotpath = f"{plotdir}/filter_stats.png"
     logging.info(f"Plotting statistics of filtered paths at {plotpath}")
-    dfs = [full_path_df, top_path_df]
-    df_names = ["All Paths", "Selected Paths"]
+    dfs = [full_path_df, top_path_df, selected_path_df]
+    df_names = ["All Paths", "Paths with Quality > 0", "Selected Paths"]
     cols = ["mean_quality", "mean_rotprob", "mean_distance", "mean_linker_length"]
     col_names = ["Structure Quality", "Rotamer Probability", "Average Distance", "Average Linker Length"]
     y_labels = ["Quality Score [AU]", "Probability [%]", "Distance [\u00C5]", "Number of Residues"]
-    dims = [(0, 0.3), (0, 100), None, None]
+    dims = [(0, 1), (0, 100), None, None]
     _ = plots.violinplot_multiple_cols_dfs(dfs, df_names=df_names, cols=cols, titles=col_names, y_labels=y_labels, dims=dims, out_path=plotpath)
 
     ##################### PDB-FILE Reassembly ##############################################
     # sanity
     pdb_dir = f"{args.output_dir}/pdb_in/"
     if not os.path.isdir(pdb_dir): os.makedirs(pdb_dir, exist_ok=True)
-    num_res=74
 
     # Store pdb-files of reassembled Fragments at <out_path>
-    logging.info(f"Generating PDB-files for top {len(top_path_df)} fragment ensembles at {pdb_dir}")
-    pdb_files = [assemble_pdb(top_path_df.loc[index], out_path=pdb_dir, fragment_dict_dict=unique_fragments_dict) for index in top_path_df.index]
+    logging.info(f"Generating PDB-files for top {len(selected_path_df)} fragment ensembles at {pdb_dir}")
+    pdb_files = [assemble_pdb(selected_path_df.loc[index], out_path=pdb_dir, fragment_dict_dict=unique_fragments_dict) for index in selected_path_df.index]
 
     # write contigs for inpainting
     inpaint_contigs_path = f"{args.output_dir}/inpaint_pose_opts.json" # output path to inpaint contigs file
     logging.info(f"Writing inpaint pose options to {inpaint_contigs_path}")
-    contigs_dict = write_inpaint_contigs_to_json(top_path_df, inpaint_contigs_path, fragment_dict=unique_fragments_dict, max_length=args.pdb_length)
+    contigs_dict = write_inpaint_contigs_to_json(selected_path_df, inpaint_contigs_path, fragment_dict=unique_fragments_dict, max_length=args.pdb_length)
 
     # write fixedres and motif_res json files for Inpainting:
     fixedres_filename = f"{args.output_dir}/fixed_res.json"
     motif_res_filename = f"{args.output_dir}/motif_res.json"
     logging.info(f"Writing motif and fixed residue dicts to json files {fixedres_filename} and {motif_res_filename}")
-    fixedres = write_fixedres_to_json(top_path_df, unique_fragments_dict, fixedres_filename)
-    motif_res = write_motif_res_to_json(top_path_df, unique_fragments_dict, motif_res_filename)
+    fixedres = write_fixedres_to_json(selected_path_df, unique_fragments_dict, fixedres_filename)
+    motif_res = write_motif_res_to_json(selected_path_df, unique_fragments_dict, motif_res_filename)
+    
+    # store selected paths DataFrame
+    scores_path = f"{args.output_dir}/selected_paths.json"
+    logging.info(f"Storing selected path scores at {scores_path}")
+    selected_path_df.to_json(scores_path)
 
+    # Finish
+    logging.info(f"Done")
 
 if __name__ == "__main__":
     import argparse
@@ -786,6 +807,7 @@ if __name__ == "__main__":
     argparser.add_argument("--max_linker_distance", type=float, default=15, help="Maximum Distance that the linker should have.")
     argparser.add_argument("--weight_rotprob", type=float, default=1, help="Strength of the rotamer probability weight for filtering")
     argparser.add_argument("--weight_structure_quality", type=float, default=3, help="Strength of the structure quality weight for filtering")
+    argparser.add_argument("--sample_from_subset_fraction", type=float, default=0, help="Take random sample from top <subset> rows of DataFrame.")
 
     # Structure Quality
     argparser.add_argument("--plddt_threshold", type=float, default=0.7, help="Threshold for filtering inpaint plddts during quality-score calculation")
@@ -793,4 +815,5 @@ if __name__ == "__main__":
     argparser.add_argument("--rmsd_strength", type=float, default=1, help="Strength for RMSD filtering if RMSD is above the Threshold. For quality-score calculation")
     args = argparser.parse_args()
 
+    if args.sample_from_subset_fraction > 1: raise ValueError(f"random_sample_subset_fraction can only be value between 0 and 1!")
     main(args)

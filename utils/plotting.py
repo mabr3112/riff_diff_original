@@ -49,8 +49,8 @@ def violinplot_multiple_cols_dfs(dfs, df_names, cols, titles, y_labels, dims=Non
     
     # get colors from colormap
     colors = [mcolors.to_hex(color) for color in plt.get_cmap(colormap).colors]
-    fig, ax_list = plt.subplots(1, len(cols), figsize=(3*len(cols), 5))
-    fig.subplots_adjust(wspace=1.5, hspace=0.8)
+    fig, ax_list = plt.subplots(1, len(cols), figsize=(3*len(cols)+0.8*(len(dfs)), 5))
+    fig.subplots_adjust(wspace=1, hspace=0.8)
     if not dims: dims = [None for x in cols]
 
     for ax, col, name, label, dim in zip(ax_list, cols, titles, y_labels, dims):
@@ -58,14 +58,14 @@ def violinplot_multiple_cols_dfs(dfs, df_names, cols, titles, y_labels, dims=Non
         ax.set_ylabel(label, size=15)
         ax.set_xticks([])
         data = [df[col].to_list() for df in dfs]
-        parts = ax.violinplot([df[col].to_list() for df in dfs], widths=0.5)
+        parts = ax.violinplot([df[col].to_list() for df in dfs], widths=0.7)
         if dim: ax.set_ylim(dim)
         set_violinstyle(parts, colors=colors)
 
         for i, d in enumerate(data):
             quartile1, median, quartile3 = np.percentile(d, [25, 50, 75])
             ax.scatter(i+1, median, marker='o', color="white", s=40, zorder=3)
-            ax.vlines(i+1, quartile1, quartile3, color="k", linestyle="-", lw=10)
+            ax.vlines(i+1, quartile1, quartile3, color="k", linestyle="-", lw=5)
             ax.vlines(i+1, np.min(d), np.max(d), color="k", linestyle="-", lw=2)
 
         handles = [mpatches.Patch(color=c, label=l) for c, l in zip(colors, df_names)]

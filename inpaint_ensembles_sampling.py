@@ -5,6 +5,7 @@ sys.path += ["/home/mabr3112/projects/iterative_refinement/"]
 import json
 from iterative_refinement import *
 from glob import glob
+import utils.plotting as plots
 
 def main(args):
     # print Status
@@ -63,6 +64,23 @@ def main(args):
     # Filter Redesigns based on confidence and RMSDs
     esm_comp_score = ensembles.calc_composite_score("esm_comp_score", ["esm_plddt", "esm_bb_ca_motif_rmsd"], [-1, 1])
     esm_filter = ensembles.filter_poses_by_score(1, "esm_comp_score", remove_layers=1, prefix="esm_filter")
+    
+    # Plot Results
+    if not os.path.isdir((plotdir := f"{ensembles.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
+
+    # Inpainting stats:
+    cols = ["inpainting_lddt", "inpainting_inpaint_lddt", "inpaint_template_bb_ca_motif_rmsd", "inpainting_trf_motif_bb_ca_rmsd"]
+    titles = ["Full Inpainting\npLDDT", "Inpaint-ONLY\npLDDT", "TRF-Inpaint\nMotif RMSD", "TRF-Template\nMotif RMSD"]
+    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]"]
+    dims = [(0,1), (0,1), (0,2), (0,2)]
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/inpainting_stats.png")
+
+    # ESM stats:
+    cols = ["mpnn_score", "esm_plddt", "esm_bb_ca_rmsd", "esm_bb_ca_motif_rmsd"]
+    titles = ["MPNN score", "ESM pLDDT", "ESM BB-Ca RMSD", "ESM Motif-Ca RMSD"]
+    y_labels = ["-log(prob)", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]"]
+    dims = [(0,2), (0,100), (0,15), (0,15)]
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/esm_stats.png")
 
     # Store filtered poses away:
     ensembles.dump_poses(f"{args.output_dir}/final_pdbs/")
