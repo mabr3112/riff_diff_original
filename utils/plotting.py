@@ -1,8 +1,10 @@
 ##################################### PLOTTING ###########################################################
+import matplotlib
 from matplotlib import pyplot as plt
 from matplotlib import rc
 import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
+matplotlib.use('Agg')
 
 import numpy as np
 
@@ -30,7 +32,7 @@ def singular_violinplot(data: list, y_label: str, title: str, out_path:str=None,
     ax.vlines(1, quartile1, quartile3, color="k", linestyle="-", lw=10)
     ax.vlines(1, np.min(distances), np.max(distances), color="k", linestyle="-", lw=2)
     
-    if out_path: fig.savefig(out_path, dpi=800, format="png", bbox_inches="tight")
+    if out_path: fig.savefig(out_path, dpi=300, format="png", bbox_inches="tight")
     else: fig.show()
     return None
 
@@ -72,7 +74,7 @@ def violinplot_multiple_cols_dfs(dfs, df_names, cols, titles, y_labels, dims=Non
         fig.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, 0.1),
                   fancybox=True, shadow=True, ncol=5, fontsize=13)
         
-    if out_path: fig.savefig(out_path, dpi=800, format="png", bbox_inches="tight")
+    if out_path: fig.savefig(out_path, dpi=300, format="png", bbox_inches="tight")
     else: fig.show()
     return None
 
@@ -107,7 +109,7 @@ def violinplot_multiple_cols(df, cols, titles, y_labels, dims=None, out_path=Non
         ax.vlines(1, quartile1, quartile3, color="k", linestyle="-", lw=10)
         ax.vlines(1, np.min(data), np.max(data), color="k", linestyle="-", lw=2)
 
-    if out_path: fig.savefig(out_path, dpi=800, format="png", bbox_inches="tight")
+    if out_path: fig.savefig(out_path, dpi=300, format="png", bbox_inches="tight")
     else: fig.show()
     return None
 
@@ -141,6 +143,6 @@ def violinplot_multiple_lists(lists: list, titles: list[str], y_labels: list[str
         ax.vlines(1, quartile1, quartile3, color="k", linestyle="-", lw=10)
         ax.vlines(1, np.min(sublist), np.max(sublist), color="k", linestyle="-", lw=2)
 
-    if out_path: fig.savefig(out_path, dpi=800, format="png", bbox_inches="tight")
+    if out_path: fig.savefig(out_path, dpi=300, format="png", bbox_inches="tight")
     else: fig.show()
     return None

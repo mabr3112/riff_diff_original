@@ -22,9 +22,11 @@ from Bio import SVDSuperimposer
 from scipy.spatial.transform import Rotation as R
 
 # import custom modules
+sys.path.append("/home/mabr3112/riff_diff/")
 import utils.helix_randomization_tools as helix_randomization_tools
 from models.riff_diff_models import *
 import utils.plotting as plots
+
 
 ########### Collecting Unique Elements from DF #######################
 def extract_unique_frags_from_dict(input_dict: dict):
@@ -495,7 +497,7 @@ def write_motif_res_to_json(input_df: pd.DataFrame, fragments_dict: dict, json_p
 
 def main(args):
     ### Code ####
-    script_dir = "/".join(__file__.split("/")[:-1])
+    script_dir = "/home/mabr3112/riff_diff/"
     scaling_params_file = f"{script_dir}/models/scaling_params_10k2.json"
     path_to_fragment = f"{script_dir}/utils/helix.pdb"
 

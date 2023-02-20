@@ -1,2 +1,5 @@
 testruns
-*__pycache__*
+.*__pycache__.*
+*pycache*
+utils/__pycache__*
+models/__pycache*

@@ -1,5 +1,6 @@
 #!/home/mabr3112/anaconda3/bin/python3.9
 import sys
+sys.path.append("/home/mabr3112/riff_diff")
 sys.path += ["/home/mabr3112/projects/iterative_refinement/"]
 
 import json
@@ -12,7 +13,8 @@ def main(args):
     print(f"\n{'#'*50}\nRunning inpaint_ensembles.py on {args.input_dir}\n{'#'*50}\n")
 
     # Parse Poses
-    ensembles = Poses(args.output_dir, glob(f"{args.input_dir}/pdb_in/*.pdb"))
+    pdb_dir = f"{args.input_dir}/pdb_in/"
+    ensembles = Poses(args.output_dir, glob(f"{pdb_dir}/*.pdb"))
     ensembles.max_inpaint_gpus = args.max_inpaint_gpus
 
     # add contigs from json file to poses_df for pose options call
@@ -47,7 +49,7 @@ def main(args):
     _ = [ensembles.update_motif_res_mapping(motif_col=col, inpaint_prefix="inpainting") for col in motif_cols]
 
     # Filter down (first, to one inpaint per backbone, then by half) based on pLDDT and RMSD
-    inpaint_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=args.input_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="inpaint_template_bb_ca", remove_layers=1)
+    inpaint_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="inpaint_template_bb_ca", remove_layers=1)
     inpaint_comp_score = ensembles.calc_composite_score("inpaint_comp_score", ["inpainting_lddt", "inpaint_template_bb_ca_motif_rmsd"], [-1, args.inpaint_rmsd_weight])
     inpaint_sampling_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "inpaint_comp_score", prefix="inpaint_sampling_filter", remove_layers=1)
     #inpaint_filter = ensembles.filter_poses_by_score(100, "inpaint_comp_score", prefix="inpaint_filter")
@@ -59,7 +61,7 @@ def main(args):
     # Run ESMFold and calc bb_ca_rmsd and motif_ca_rmsd
     esm_preds = ensembles.predict_sequences(run_ESMFold, prefix="esm")
     esm_bb_ca_rmsds = ensembles.calc_bb_rmsd_dir(ref_pdb_dir=inpaints, metric_prefix="esm", ref_chains=["A"], pose_chains=["A"], remove_layers=1)
-    esm_motif_rmsds = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=args.input_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="esm_bb_ca", remove_layers=2)
+    esm_motif_rmsds = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="esm_bb_ca", remove_layers=2)
 
     # Filter Redesigns based on confidence and RMSDs
     esm_comp_score = ensembles.calc_composite_score("esm_comp_score", ["esm_plddt", "esm_bb_ca_motif_rmsd"], [-1, 1])
@@ -84,6 +86,9 @@ def main(args):
 
     # Store filtered poses away:
     ensembles.dump_poses(f"{args.output_dir}/final_pdbs/")
+
+    # merge poses_df with ensemble_evaluator output and store combined DataFrame:
+
 
 if __name__ == "__main__":
     import argparse
