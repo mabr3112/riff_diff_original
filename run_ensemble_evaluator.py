@@ -302,6 +302,10 @@ def adjust_qs_for_linker_length(qs_list: list[tuple], tolerance:int=2, strength:
     '''AAA'''
     return [(x[0] - x[0] * (np.maximum(x[1]-tolerance,0)*strength/10), x[1]) for x in qs_list]
 
+def reverse_adjust_qs_for_linker_length(qs_list: list[tuple], tolerance:int=2, strength:float=0.5) -> list[tuple]:
+    '''AAA'''
+    return [(x[0]/(1 - (np.maximum(x[1]-tolerance,0)*strength/10)), x[1]) for x in qs_list]
+
 ########################## Pathsearch ###############################################################
 def normalize_col(df: pd.DataFrame, col: str) -> pd.DataFrame:
     ''''''
@@ -668,6 +672,9 @@ def main(args):
     # take top quality scores:
     keys_quality_scores_dict_top = {key: max(qs, key=lambda x: x[0]) for key, qs in keys_quality_scores_dict.items()}
     quality_scores_dict_top = {pairings_dict[key]: qs for key, qs in keys_quality_scores_dict_top.items()}
+
+    # readjust if option adjust is set:
+    keys_quality_scores_dict_top = {key: reverse_adjust_qs_for_linker_length([val])[0] for key, val in keys_quality_scores_dict_top.items()}
 
     ##################### PATHSEARCH ###########################################################
     ## Compile Pairings Dictionary and DataFrame for all possible paths through all residues
