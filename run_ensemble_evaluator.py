@@ -11,6 +11,7 @@ import functools
 from itertools import chain
 from copy import deepcopy
 from glob import glob
+import re
 
 # import dependencies
 from matplotlib import pyplot as plt
@@ -353,9 +354,8 @@ def calc_path_mean_plddt(path_df):
 def filter_paths(path_df, min_quality:float=0.01, max_linker_length:int=5):
     '''
     '''
-    f1_path_df = path_df.loc[path_df[[x for x in path_df.columns if "quality" in x]].min(axis=1) >= min_quality]
-    f2_path_df = f1_path_df.loc[f1_path_df[[x for x in f1_path_df.columns if "linker" in x]].max(axis=1) <= max_linker_length]
-    
+    f1_path_df = path_df.loc[path_df[[x for x in path_df.columns if re.search("^[0-9]+_quality$",x)]].min(axis=1) >= min_quality]
+    f2_path_df = f1_path_df.loc[f1_path_df[[x for x in f1_path_df.columns if re.search("^[0-9]+_linker$", x)]].max(axis=1) <= max_linker_length]
     return f2_path_df
 
 def sample_from_path_df(df: pd.DataFrame, n: int, random_sample_subset_fraction:float=1.0):
@@ -673,7 +673,6 @@ def main(args):
     ## Compile Pairings Dictionary and DataFrame for all possible paths through all residues
     def compile_nodes_from_dict(row: dict) -> list:
         '''AAA'''
-        #print(row)
         return [f"{key}{row[key]['frag_num']}" for key in row]
 
     # collect nodes for paths:
