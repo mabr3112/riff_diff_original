@@ -48,7 +48,7 @@ def main(args):
 
     # Inpaint, relax and calc pLDDT
     t = args.translation_sampling_magnitude
-    inpaints = ensembles.inpaint(options=f"--n_cycle 15 --num_designs {args.num_inpaints} --tie_translate='A1-7,{t}:B1-7,{t}:C1-7,{t}'", pose_options=list(ensembles.poses_df["inpainting_pose_opts"]), prefix="inpainting", perres_lddt=True, perres_inpaint_lddt=True)
+    inpaints = ensembles.inpaint(options=f"--n_cycle 15 --num_designs {args.num_inpaints} --tie_translate='A1-5,{t}:B1-5,{t}:C1-5,{t}'", pose_options=list(ensembles.poses_df["inpainting_pose_opts"]), prefix="inpainting", perres_lddt=True, perres_inpaint_lddt=True)
     #inpaints = ensembles.inpaint(options=f"--n_cycle 15 --num_designs 1", pose_options=list(ensembles.poses_df["inpainting_pose_opts"]), prefix="inpainting", perres_lddt=True, perres_inpaint_lddt=True)
 
     # Update motif_res and fixedres to residue mapping after inpainting
@@ -68,10 +68,10 @@ def main(args):
     esm_preds = ensembles.predict_sequences(run_ESMFold, prefix="esm")
     esm_bb_ca_rmsds = ensembles.calc_bb_rmsd_dir(ref_pdb_dir=inpaints, metric_prefix="esm", ref_chains=["A"], pose_chains=["A"], remove_layers=1)
     esm_motif_rmsds = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="esm_bb_ca", remove_layers=2)
-    #esm_motif_heavy_rmsds = ensembles.calc_motif_heavy_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=ensembles.poses_df["template_fixedres"].to_list(), target_motif=ensembles.poses_df["fixed_residues"].to_list(), metric_prefix="esm_catres", remove_layers=2)
+    esm_motif_heavy_rmsds = ensembles.calc_motif_heavy_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=ensembles.poses_df["template_fixedres"].to_list(), target_motif=ensembles.poses_df["fixed_residues"].to_list(), metric_prefix="esm_catres", remove_layers=2)
 
     # Filter Redesigns based on confidence and RMSDs
-    esm_comp_score = ensembles.calc_composite_score("esm_comp_score", ["esm_plddt", "esm_bb_ca_motif_rmsd"], [-1, 1])
+    esm_comp_score = ensembles.calc_composite_score("esm_comp_score", ["esm_plddt", "esm_bb_ca_motif_rmsd", "esm_catres_motif_heavy_rmsd"], [-1, 1, 1])
     esm_filter = ensembles.filter_poses_by_score(1, "esm_comp_score", remove_layers=1, prefix="esm_filter")
     
     # Plot Results
