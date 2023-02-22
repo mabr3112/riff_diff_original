@@ -501,7 +501,10 @@ def write_motif_res_to_json(input_df: pd.DataFrame, fragments_dict: dict, json_p
 
 def main(args):
     ### Code ####
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.environ.get('SLURM_SUBMIT_DIR'):
+        script_dir = "/home/mabr3112/riff_diff/"
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
     scaling_params_file = f"{script_dir}/models/scaling_params_10k2.json"
     path_to_fragment = f"{script_dir}/utils/helix.pdb"
 
