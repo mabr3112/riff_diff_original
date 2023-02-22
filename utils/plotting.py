@@ -4,7 +4,10 @@ from matplotlib import pyplot as plt
 from matplotlib import rc
 import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
-matplotlib.use('Agg')
+if __file__.startswith("/home/mabr3112"):
+    matplotlib.use('Agg')
+else:
+    print("Using Matplotlib without 'Agg' backend.")
 
 import numpy as np
 

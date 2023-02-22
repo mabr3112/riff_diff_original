@@ -789,6 +789,7 @@ def main(args):
     logging.info(f"Writing motif and fixed residue dicts to json files {fixedres_filename} and {motif_res_filename}")
     fixedres = write_fixedres_to_json(selected_path_df, unique_fragments_dict, fixedres_filename)
     motif_res = write_motif_res_to_json(selected_path_df, unique_fragments_dict, motif_res_filename)
+    motif_identities = write_resids_to_json(selected_path_df, unique_fragments_dict, (res_ids_filename := f"{args.output_dir}/res_identities.json"))
     
     # store selected paths DataFrame
     scores_path = f"{args.output_dir}/selected_paths.json"
