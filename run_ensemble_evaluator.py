@@ -505,7 +505,7 @@ def get_fixed_res(input_series: pd.Series, fragment_dict: dict) -> dict:
 
 def get_res_identity(input_series: pd.Series, fragment_dict: dict) -> dict:
     ''''''
-    return [{f"{chr(ord('A')+(i))}": [fragment_dict[fragment]["identity"]] for i, fragment in enumerate(get_fragments(input_series))}]
+    return [{f"{chr(ord('A')+(i))}{fragment_dict[fragment]['res_num']}": fragment_dict[fragment]["identity"] for i, fragment in enumerate(get_fragments(input_series))}]
 
 def write_fixedres_to_json(input_df: pd.DataFrame, fragments_dict: dict, json_path: str) -> dict:
     '''AAA'''

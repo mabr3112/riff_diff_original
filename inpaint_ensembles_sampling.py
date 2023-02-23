@@ -32,8 +32,8 @@ def main(args):
     motif_cols = ["fixed_residues", "motif_residues"]
 
     # replace translation_magnitude and rotation_degrees in pose opts with arguments from commandline:
-    pose_opts_df["inpainting_pose_opts"] = pose_opts_df["inpainting_pose_opts"].str.replace("", "")
-    pose_opts_df["inpainting_pose_opts"] = pose_opts_df["inpainting_pose_opts"].str.replace("", "")
+    pose_opts_df["inpainting_pose_opts"] = pose_opts_df["inpainting_pose_opts"].str.replace("translate_sampling_magnitude", str(args.translation_sampling_magnitude))
+    pose_opts_df["inpainting_pose_opts"] = pose_opts_df["inpainting_pose_opts"].str.replace("rotate_sampling_degrees", str(args.rotation_sampling_degrees))
 
     # Read scores of selected paths from ensemble_evaluator and store them in poses_df:
     path_df = pd.read_json(f"{args.input_dir}/selected_paths.json").reset_index().rename(columns={"index": "rdescription"})
@@ -51,7 +51,6 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # Inpaint, relax and calc pLDDT
-    t = args.translation_sampling_magnitude
     inpaints = ensembles.inpaint(options=f"--n_cycle 15 --num_designs {args.num_inpaints}", pose_options=list(ensembles.poses_df["inpainting_pose_opts"]), prefix="inpainting", perres_lddt=True, perres_inpaint_lddt=True)
     #inpaints = ensembles.inpaint(options=f"--n_cycle 15 --num_designs 1", pose_options=list(ensembles.poses_df["inpainting_pose_opts"]), prefix="inpainting", perres_lddt=True, perres_inpaint_lddt=True)
 
@@ -110,6 +109,7 @@ if __name__ == "__main__":
     argparser.add_argument("--num_inpaints", type=int, default=10, help="Number of inpaints for each input fragment for subsampling.")
     argparser.add_argument("--num_inpaint_cycles", type=int, default=15, help="Number of inpainting recycles to run for each inpainting.")
     argparser.add_argument("--translation_sampling_magnitude", type=float, default=0.1, help="Magnitude of random translation of fragments for randomized sampling during inpainting.")
+    argparser.add_argument("--rotation_sampling_degrees", type=float, default=1, help="Degrees. How much to rotate fragments during inpainting.")
     argparser.add_argument("--inpaint_rmsd_weight", type=float, default=3.0, help="Weight of inpainting RMSD score for filtering sampled inpaints.")
     argparser.add_argument("--max_inpaint_gpus", type=int, default=10, help="On how many GPUs at a time to you want to run inpainting?")
 
