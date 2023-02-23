@@ -31,6 +31,10 @@ def main(args):
     motif_res_df = pd.DataFrame.from_dict(motif_res_dict, orient="index").reset_index().rename(columns={"index": "3description", 0: "motif_residues"})
     motif_cols = ["fixed_residues", "motif_residues"]
 
+    # replace translation_magnitude and rotation_degrees in pose opts with arguments from commandline:
+    pose_opts_df["inpainting_pose_opts"] = pose_opts_df["inpainting_pose_opts"].str.replace("", "")
+    pose_opts_df["inpainting_pose_opts"] = pose_opts_df["inpainting_pose_opts"].str.replace("", "")
+
     # Read scores of selected paths from ensemble_evaluator and store them in poses_df:
     path_df = pd.read_json(f"{args.input_dir}/selected_paths.json").reset_index().rename(columns={"index": "rdescription"})
     ensembles.poses_df = ensembles.poses_df.merge(path_df, left_on="poses_description", right_on="rdescription")
@@ -48,7 +52,7 @@ def main(args):
 
     # Inpaint, relax and calc pLDDT
     t = args.translation_sampling_magnitude
-    inpaints = ensembles.inpaint(options=f"--n_cycle 15 --num_designs {args.num_inpaints} --tie_translate='A1-7,{t}:B1-7,{t}:C1-7,{t}'", pose_options=list(ensembles.poses_df["inpainting_pose_opts"]), prefix="inpainting", perres_lddt=True, perres_inpaint_lddt=True)
+    inpaints = ensembles.inpaint(options=f"--n_cycle 15 --num_designs {args.num_inpaints}", pose_options=list(ensembles.poses_df["inpainting_pose_opts"]), prefix="inpainting", perres_lddt=True, perres_inpaint_lddt=True)
     #inpaints = ensembles.inpaint(options=f"--n_cycle 15 --num_designs 1", pose_options=list(ensembles.poses_df["inpainting_pose_opts"]), prefix="inpainting", perres_lddt=True, perres_inpaint_lddt=True)
 
     # Update motif_res and fixedres to residue mapping after inpainting

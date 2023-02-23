@@ -455,6 +455,22 @@ def compile_inpaint_seq(fragments, fragment_dict):
         
     return ",".join(inpaint_str_l)
 
+def compile_translate_str(fragments: list[str], fragment_dict: dict) -> str:
+    '''AAA'''
+    translate_str_l = list()
+    for i, frag in enumerate(fragments):
+        length = fragment_dict[frag]["frag_length"]
+        translate_str_l.append(f"{chr(ord('A')+i)}1-{length},translate_sampling_magnitude")
+    return ":".join(translate_str_l)
+
+def compile_rotate_str(fragments: list[str], fragment_dict: dict) -> str:
+    '''AAA'''
+    rotate_str_l = list()
+    for i, frag in enumerate(fragments):
+        length = fragment_dict[frag]["frag_length"]
+        rotate_str_l.append(f"{chr(ord('A')+i)}1-{length},rotate_sampling_degrees")
+    return ":".join(rotate_str_l)
+
 def compile_inpaint_pose_opts(input_series: pd.Series, fragment_dict: dict, max_length=74) -> str:
     '''Compile and write pose options for inpainting'''
     # Calculate fragment_contigs, linkers and flankers for inpainting contig:
@@ -466,9 +482,11 @@ def compile_inpaint_pose_opts(input_series: pd.Series, fragment_dict: dict, max_
     # compile contig_string and inpaint_seq string:
     contig_str = compile_contig_string(fragment_contigs, linkers, nterm, cterm)
     inpaint_seq_str = compile_inpaint_seq(fragments, fragment_dict)
+    translate_str = compile_translate_str(fragments, fragment_dict)
+    rotate_str = compile_rotate_str(fragments, fragment_dict)
     
     # combine into pose_options string:
-    return f"--contigs {contig_str} --inpaint_seq {inpaint_seq_str}"
+    return f"--contigs {contig_str} --inpaint_seq {inpaint_seq_str} --tie_translate {translate_str} --block_rotate {rotate_str}"
 
 def write_inpaint_contigs_to_json(input_df: pd.DataFrame, json_path: str, fragment_dict: dict, max_length: int) -> dict:
     '''AAA'''
@@ -485,6 +503,10 @@ def get_fixed_res(input_series: pd.Series, fragment_dict: dict) -> dict:
     '''Get Motif for motif residues from series.'''
     return [{f"{chr(ord('A')+(i))}": [fragment_dict[fragment]["res_num"]] for i, fragment in enumerate(get_fragments(input_series))}]
 
+def get_res_identity(input_series: pd.Series, fragment_dict: dict) -> dict:
+    ''''''
+    return [{f"{chr(ord('A')+(i))}": [fragment_dict[fragment]["identity"]] for i, fragment in enumerate(get_fragments(input_series))}]
+
 def write_fixedres_to_json(input_df: pd.DataFrame, fragments_dict: dict, json_path: str) -> dict:
     '''AAA'''
     out_dict = {index: get_fixed_res(input_df.loc[index], fragments_dict) for index in input_df.index}
@@ -495,6 +517,13 @@ def write_fixedres_to_json(input_df: pd.DataFrame, fragments_dict: dict, json_pa
 def write_motif_res_to_json(input_df: pd.DataFrame, fragments_dict: dict, json_path: str) -> dict:
     '''AAA'''
     out_dict = {index: get_motif_res(input_df.loc[index], fragments_dict) for index in input_df.index}
+    with open(json_path, 'w') as f:
+        json.dump(out_dict, f)
+    return out_dict
+
+def write_residue_identities_to_json(input_df: pd.DataFrame, fragments_dict: dict, json_path: str) -> dict:
+    '''AAA'''
+    out_dict = {index: get_res_identity(input_df.loc[index], fragments_dict) for index in input_df.index}
     with open(json_path, 'w') as f:
         json.dump(out_dict, f)
     return out_dict
@@ -792,7 +821,7 @@ def main(args):
     logging.info(f"Writing motif and fixed residue dicts to json files {fixedres_filename} and {motif_res_filename}")
     fixedres = write_fixedres_to_json(selected_path_df, unique_fragments_dict, fixedres_filename)
     motif_res = write_motif_res_to_json(selected_path_df, unique_fragments_dict, motif_res_filename)
-    motif_identities = write_resids_to_json(selected_path_df, unique_fragments_dict, (res_ids_filename := f"{args.output_dir}/res_identities.json"))
+    motif_identities = write_residue_identities_to_json(selected_path_df, unique_fragments_dict, (res_ids_filename := f"{args.output_dir}/res_identities.json"))
     
     # store selected paths DataFrame
     scores_path = f"{args.output_dir}/selected_paths.json"
