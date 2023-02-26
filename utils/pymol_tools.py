@@ -4,7 +4,7 @@
 #
 #
 #
-
+import pandas as pd
 
 def write_pymol_alignment_script(df:pd.DataFrame, scoreterm: str, top_n:int, path_to_script: str, ascending=True) -> str:
     '''
@@ -37,7 +37,7 @@ def write_align_cmds(input_data: pd.Series):
 
     # select inpaint_motif residues
     cmds.append(f"select temp_motif_res, {write_pymol_motif_selection(input_data['poses_description'], input_data['motif_residues'])}")
-    cmds.append(f"select temp_ref_res, {write_pymol_motif_selection(ref_pose_name, input_data['template_motif_residues'])}")
+    cmds.append(f"select temp_ref_res, {write_pymol_motif_selection(ref_pose_name, input_data['template_motif'])}")
 
     # superimpose inpaint_motif_residues:
     cmds.append(f"super temp_ref_res, temp_motif_res")
