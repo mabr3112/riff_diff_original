@@ -706,7 +706,7 @@ def main(args):
     quality_scores_dict_top = {pairings_dict[key]: qs for key, qs in keys_quality_scores_dict_top.items()}
 
     # readjust if option adjust is set:
-    keys_quality_scores_dict_top = {key: reverse_adjust_qs_for_linker_length([val])[0] for key, val in keys_quality_scores_dict_top.items()}
+    keys_quality_scores_dict_top = {key: reverse_adjust_qs_for_linker_length([val], tolerance=1, strength=args.short_linker_preference)[0] for key, val in keys_quality_scores_dict_top.items()}
 
     ##################### PATHSEARCH ###########################################################
     ## Compile Pairings Dictionary and DataFrame for all possible paths through all residues

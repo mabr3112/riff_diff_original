@@ -89,22 +89,20 @@ def main(args):
     if not os.path.isdir((plotdir := f"{ensembles.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
 
     # Inpainting stats:
-    cols = ["inpainting_lddt", "inpainting_inpaint_lddt", "inpaint_template_bb_ca_motif_rmsd", "inpainting_trf_motif_bb_ca_rmsd"]
-    titles = ["Full Inpainting\npLDDT", "Inpaint-ONLY\npLDDT", "TRF-Inpaint\nMotif RMSD", "TRF-Template\nMotif RMSD"]
-    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]"]
-    dims = [(0,1), (0,1), (0,2), (0,2)]
+    cols = ["inpainting_lddt", "inpainting_inpaint_lddt", "inpaint_template_bb_ca_motif_rmsd", "inpainting_trf_motif_bb_ca_rmsd", "mpnn_score"]
+    titles = ["Full Inpainting\npLDDT", "Inpaint-ONLY\npLDDT", "TRF-Inpaint\nMotif RMSD", "TRF-Template\nMotif RMSD", "MPNN score"]
+    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "-log(prob)"]
+    dims = [(0,1), (0,1), (0,2), (0,2), (0,2)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/inpainting_stats.png")
 
     # ESM stats:
-    cols = ["mpnn_score", "esm_plddt", "esm_bb_ca_rmsd", "esm_bb_ca_motif_rmsd"]
-    titles = ["MPNN score", "ESM pLDDT", "ESM BB-Ca RMSD", "ESM Motif-Ca RMSD"]
-    y_labels = ["-log(prob)", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]"]
-    dims = [(0,2), (0,100), (0,15), (0,8)]
+    cols = ["esm_plddt", "esm_bb_ca_rmsd", "esm_bb_ca_motif_rmsd", "esm_catres_motif_heavy_rmsd"]
+    titles = ["ESM pLDDT", "ESM BB-Ca RMSD", "ESM Motif-Ca RMSD", "ESM Catres\nSidechain RMSD"]
+    y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]"]
+    dims = [(0,100), (0,15), (0,8), (0,8)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/esm_stats.png")
     # Store filtered poses away:
     ensembles.dump_poses(f"{args.output_dir}/final_pdbs/")
-
-
 
 if __name__ == "__main__":
     import argparse
