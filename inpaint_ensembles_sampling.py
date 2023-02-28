@@ -7,6 +7,29 @@ import json
 from iterative_refinement import *
 from glob import glob
 import utils.plotting as plots
+import utils.biopython_tools
+import utils.pymol_tools
+
+def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, motif_prefix: str, out_pdb_path=None) -> list[str]:
+    ''''''
+    list_of_mappings = [utils.biopython_tools.residue_mapping_from_motif(ref_motif, inp_motif) for ref_motif, inp_motif in zip(input_df[f"{motif_prefix}_inpainting_con_ref_pdb_idx"].to_list(), input_df["{motif_prefix}_inpainting_con_hal_pdb_idx"].to_list())]
+    output_pdb_names_list = [f"{out_pdb_path}/{desc}" for desc in input_df[desc_col].to_list()]
+
+    list_of_output_paths = [utils.biopython_tools.renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
+
+    return list_of_output_paths
+
+def parse_outfilter_args(scoreterm_str: str, weights_str: str, df: pd.DataFrame) -> tuple[list]:
+    ''''''
+    def check_for_col_in_df(col: str, datf: pd.DataFrame) -> None:
+        if col not in datf.columns: raise KeyError("Scoreterm {col} not found in poses_df. Available scoreterms: {','.join(datf.columns)}")
+    scoreterms = scoreterm_str.split(",")
+    weights = [float(x) for x in weights_str.split(",")]
+    check = [check_for_col_in_df(scoreterm, df) for scoreterm in scoreterms]
+
+    if not len(scoreterms) == len(weights): raise ValueError(f"Length of --output_scoreterms ({scoreterm_str}: {len(scoreterm_str)}) and --output_scoreterm_weights ({weights_str}: {len(weights_str)}) is not the same. Both arguments must be of the same length!")
+
+    return scoreterms, weights
 
 def main(args):
     # print Status
@@ -65,7 +88,7 @@ def main(args):
     # Filter down (first, to one inpaint per backbone, then by half) based on pLDDT and RMSD
     inpaint_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="inpaint_template_bb_ca", remove_layers=1)
     inpaint_comp_score = ensembles.calc_composite_score("inpaint_comp_score", ["inpainting_lddt", "inpaint_template_bb_ca_motif_rmsd"], [-1, args.inpaint_rmsd_weight])
-    inpaint_sampling_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "inpaint_comp_score", prefix="inpaint_sampling_filter", remove_layers=1)
+    inpaint_sampling_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "inpaint_comp_score", prefix="inpaint_sampling_filter", remove_layers=1, plot=["inpaint_comp_score", "inpainting_lddt", "inpainting_inpaint_lddt", "inpaint_template_bb_ca_motif_rmsd", "inpainting_trf_motif_bb_ca_rmsd"])
     #inpaint_filter = ensembles.filter_poses_by_score(100, "inpaint_comp_score", prefix="inpaint_filter")
     
     # mutate any residues in the pose back to what they are supposed to be (inpainting sometimes does not keep the sequence)
@@ -82,8 +105,8 @@ def main(args):
     esm_motif_heavy_rmsds = ensembles.calc_motif_heavy_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=ensembles.poses_df["template_fixedres"].to_list(), target_motif=ensembles.poses_df["fixed_residues"].to_list(), metric_prefix="esm_catres", remove_layers=2)
 
     # Filter Redesigns based on confidence and RMSDs
-    esm_comp_score = ensembles.calc_composite_score("esm_comp_score", ["esm_plddt", "esm_catres_motif_heavy_rmsd"], [-1, 1])
-    esm_filter = ensembles.filter_poses_by_score(1, "esm_comp_score", remove_layers=1, prefix="esm_filter")
+    esm_comp_score = ensembles.calc_composite_score("esm_comp_score", ["esm_plddt", "esm_bb_ca_motif_rmsd"], [-1, 1])
+    esm_filter = ensembles.filter_poses_by_score(1, "esm_comp_score", remove_layers=1, prefix="esm_filter", plot=["esm_comp_score", "esm_plddt", "esm_bb_ca_rmsd", "esm_bb_ca_motif_rmsd", "esm_catres_motif_heavy_rmsd"])
     
     # Plot Results
     if not os.path.isdir((plotdir := f"{ensembles.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
@@ -101,8 +124,26 @@ def main(args):
     y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]"]
     dims = [(0,100), (0,15), (0,8), (0,8)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/esm_stats.png")
-    # Store filtered poses away:
-    ensembles.dump_poses(f"{args.output_dir}/final_pdbs/")
+    # Store filtered poses and scores away:
+    ensembles.dump_poses(f"{args.output_dir}/esm_output_pdbs/")
+
+    # Filter down to final set of .pdbs that will be input for Rosetta Refinement:
+    scoreterms, weights = parse_outfilter_args(args.output_scoreterms, args.output_scoreterm_weights, ensembles.poses_df)
+    out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", scoreterms, weights)
+    out_filter = ensembles.filter_poses_by_score(args.num_outputs, f"out_filter_comp_score", prefix="out_filter", plot=scoreterms)
+    results_dir = f"{args.output_dir}/results/"
+    ref_frag_dir = f"{results_dir}/ref_fragments/"
+    ensembles.dump_poses(results_dir)
+
+    # Copy and rewrite Fragments into output_dir/reference_fragments
+    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="inpainting_", out_pdb_path=ref_frag_dir)
+
+    # Write PyMol Alignment Script
+    ref_originals = [shutil.copyfile(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
+    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm="out_filter_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
+
+    # Plot final stats of selected poses
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{results_dir}/final_esm_stats.png")
 
 if __name__ == "__main__":
     import argparse
@@ -123,6 +164,13 @@ if __name__ == "__main__":
     argparser.add_argument("--num_mpnn_inputs", type=int, default=1, help="Number of inpaints for each input fragment that should be passed to MPNN.")
     argparser.add_argument("--num_mpnn_seqs", type=int, default=20, help="Number of MPNN Sequences to generate for each input backbone.")
     argparser.add_argument("--num_esm_inputs", type=int, default=10, help="Number of MPNN Sequences for each input backbone that should be predicted. Typically quarter to half of the sequences generated by MPNN is a good value.")
+
+    # output options
+    argparser.add_argument("--num_outputs", type=int, default=25, help="Number of .pdb files that will be stored into the final output directory.")
+    argparser.add_argument("--output_scoreterms", type=str, default="esm_plddt,esm_bb_ca_motif_rmsd", help="Scoreterms to use to filter ESMFolded PDBs to the final output pdbs. IMPORTANT: if you supply scoreterms, also supply weights and always check the filter output plots in the plots/ directory!")
+    argparser.add_argument("--output_scoreterm_weights", type=str, default="-1,1", help="Weights for how to combine the scoreterms listed in '--output_scoreterms'")
+    
+
     args = argparser.parse_args()
 
     main(args)

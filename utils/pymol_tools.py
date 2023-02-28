@@ -6,10 +6,10 @@
 #
 import pandas as pd
 
-def write_pymol_alignment_script(df:pd.DataFrame, scoreterm: str, top_n:int, path_to_script: str, ascending=True) -> str:
+def write_pymol_alignment_script(df:pd.DataFrame, scoreterm: str, top_n:int, path_to_script: str, ascending=True, use_original_location=False) -> str:
     '''
     '''
-    cmds = [write_align_cmds(df.loc[index]) for index in df.sort_values(scoreterm, ascending=ascending).head(top_n).index]
+    cmds = [write_align_cmds(df.loc[index], use_original_location=use_original_location) for index in df.sort_values(scoreterm, ascending=ascending).head(top_n).index]
     
     with open(path_to_script, 'w') as f:
         f.write("\n".join(cmds))
@@ -21,13 +21,18 @@ def write_pymol_motif_selection(obj: str, motif: dict) -> str:
     pymol_selection = ' or '.join([f"{obj} and {resis}" for resis in residues])
     return pymol_selection
 
-def write_align_cmds(input_data: pd.Series):
+def write_align_cmds(input_data: pd.Series, use_original_location=False):
     '''AAA'''
     cmds = list()
-    ref_pose = input_data["input_poses"].split("/")[-1].replace(".pdb", "")
+    if use_original_location: 
+        ref_pose = input_data["input_poses"].replace(".pdb", "")
+        pose = input_data["esm_location"]
+    else: 
+        ref_pose = input_data["input_poses"].split("/")[-1].replace(".pdb", "")
+        pose = input_data["poses_description"] + ".pdb"
 
     # load pose and reference
-    cmds.append(f"load {input_data['poses_description']}.pdb")
+    cmds.append(f"load {pose}")
     ref_pose_name = input_data['poses_description'] + "_ref"
     cmds.append(f"load {ref_pose}.pdb, {ref_pose_name}")
 
