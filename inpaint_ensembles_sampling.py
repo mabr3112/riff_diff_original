@@ -139,7 +139,7 @@ def main(args):
     updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="inpainting_", out_pdb_path=ref_frag_dir)
 
     # Write PyMol Alignment Script
-    ref_originals = [shutil.copyfile(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
+    ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
     pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm="out_filter_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
 
     # Plot final stats of selected poses

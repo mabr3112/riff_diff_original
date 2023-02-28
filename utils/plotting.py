@@ -149,3 +149,10 @@ def violinplot_multiple_lists(lists: list, titles: list[str], y_labels: list[str
     if out_path: fig.savefig(out_path, dpi=300, format="png", bbox_inches="tight")
     else: fig.show()
     return None
+
+def parse_cols_for_plotting(plot_arg: str, subst:str=None) -> list[str]:
+    '''AAA'''
+    if type(plot_arg) == str: return [plot_arg]
+    elif type(plot_arg) == list: return plot_arg
+    elif plot_arg == True: return [subst]
+    else: raise TypeError("Unsupported argument type for parse_cols_for_plotting(): {type(plot_arg)}. Only list, str or bool allowed.")
