@@ -21,7 +21,7 @@ def residue_mapping_from_motif(motif_old: list, motif_new: list) -> dict:
 
 def renumber_pose_by_residue_mapping(pose: Bio.PDB.Structure.Structure, residue_mapping: dict) -> Bio.PDB.Structure.Structure:
     '''AAA'''
-    for old_res, new_res in mapping_dict.items():
+    for old_res, new_res in residue_mapping.items():
         # change residue ID
         pose[old_res[0]][(" ", old_res[1], " ")].id = (" ", new_res[1], " ")
 

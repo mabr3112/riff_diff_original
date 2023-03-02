@@ -12,8 +12,8 @@ import utils.pymol_tools
 
 def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, motif_prefix: str, out_pdb_path=None) -> list[str]:
     ''''''
-    list_of_mappings = [utils.biopython_tools.residue_mapping_from_motif(ref_motif, inp_motif) for ref_motif, inp_motif in zip(input_df[f"{motif_prefix}_inpainting_con_ref_pdb_idx"].to_list(), input_df["{motif_prefix}_inpainting_con_hal_pdb_idx"].to_list())]
-    output_pdb_names_list = [f"{out_pdb_path}/{desc}" for desc in input_df[desc_col].to_list()]
+    list_of_mappings = [utils.biopython_tools.residue_mapping_from_motif(ref_motif, inp_motif) for ref_motif, inp_motif in zip(input_df[f"{motif_prefix}_con_ref_pdb_idx"].to_list(), input_df[f"{motif_prefix}_con_hal_pdb_idx"].to_list())]
+    output_pdb_names_list = [f"{out_pdb_path}/{desc}.pdb" for desc in input_df[desc_col].to_list()]
 
     list_of_output_paths = [utils.biopython_tools.renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
 
@@ -112,7 +112,7 @@ def main(args):
     if not os.path.isdir((plotdir := f"{ensembles.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
 
     # Inpainting stats:
-    cols = ["inpainting_lddt", "inpainting_inpaint_lddt", "inpaint_template_bb_ca_motif_rmsd", "inpainting_trf_motif_bb_ca_rmsd", "mpnn_score"]
+    cols = ["inpainting_lddt", "inpainting_inpaint_lddt", "inpainting_trf_motif_bb_ca_rmsd", "inpaint_template_bb_ca_motif_rmsd", "mpnn_score"]
     titles = ["Full Inpainting\npLDDT", "Inpaint-ONLY\npLDDT", "TRF-Inpaint\nMotif RMSD", "TRF-Template\nMotif RMSD", "MPNN score"]
     y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "-log(prob)"]
     dims = [(0,1), (0,1), (0,2), (0,2), (0,2)]
@@ -133,10 +133,11 @@ def main(args):
     out_filter = ensembles.filter_poses_by_score(args.num_outputs, f"out_filter_comp_score", prefix="out_filter", plot=scoreterms)
     results_dir = f"{args.output_dir}/results/"
     ref_frag_dir = f"{results_dir}/ref_fragments/"
+    if not os.path.isdir(ref_frag_dir): os.makedirs(ref_frag_dir, exist_ok=True)
     ensembles.dump_poses(results_dir)
 
     # Copy and rewrite Fragments into output_dir/reference_fragments
-    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="inpainting_", out_pdb_path=ref_frag_dir)
+    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="inpainting", out_pdb_path=ref_frag_dir)
 
     # Write PyMol Alignment Script
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]

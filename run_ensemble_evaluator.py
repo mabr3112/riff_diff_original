@@ -1,7 +1,6 @@
 #!/home/mabr3112/anaconda3/bin/python3.9
 # import builtins
 import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 import os
 import sys
 import json
@@ -530,6 +529,8 @@ def write_residue_identities_to_json(input_df: pd.DataFrame, fragments_dict: dic
 
 def main(args):
     ### Code ####
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}/log.txt")
+
     if os.environ.get('SLURM_SUBMIT_DIR'):
         script_dir = "/home/mabr3112/riff_diff/"
     else:
