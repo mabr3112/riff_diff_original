@@ -87,7 +87,8 @@ def main(args):
 
 if __name__ == "__main__":
     import argparse
-    
+    argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
     # general
     argparser.add_argument("--input_dir", type=str, required=True, help="input_directory that contains all ensemble *.pdb files to be inpainted.")
     argparser.add_argument("--output_dir", type=str, required=True, help="output_directory")
