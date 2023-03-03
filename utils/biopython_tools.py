@@ -27,14 +27,14 @@ def renumber_pose_by_residue_mapping(pose: Bio.PDB.Structure.Structure, residue_
 
         # change Chain if Chain-names in residue mapping don't match:
         if new_res[0] != old_res[0]: 
-            residue = struct[old_res[0]][(" ", new_res[1], " ")]
-            struct[old_res[0]].detach_child((" ", rew_res[1], " "))
-            pose[new_res[0]].add(pose[old_res[0]][(" ", new_res[1], " ")])
+            residue = pose[old_res[0]][(" ", new_res[1], " ")]
+            pose[old_res[0]].detach_child((" ", new_res[1], " "))
+            pose[new_res[0]].add(residue)
             
     # remove chains from pose that are empty:
     chain_ids = [x.id for x in pose] # for some reason, iterating over chains in struct directly does not work here...
     for chain_id in chain_ids:
-        if not struct[chain_id].__dict["child_dict"]: struct.detach_child(chain_id)
+        if not pose[chain_id].__dict__["child_dict"]: pose.detach_child(chain_id)
 
     return pose
 
