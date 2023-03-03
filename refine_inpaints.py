@@ -27,13 +27,15 @@ def main(args):
     ref_dir = f"{args.input_dir}/ref_fragments"
 
     # parse poses:
-    if not (input_pdbs := glob(f"{args.input_dir}")): raise FileNotFoundError(f"No *.pdb files found at {args.input_dir}")
-    inpaints = Poses(args.output_dir, glob(input_pdbs))
+    if not (input_pdbs := glob(f"{args.input_dir}/pdb_in/*.pdb")): raise FileNotFoundError(f"No *.pdb files found at {args.input_dir}")
+    inpaints = Poses(args.output_dir, input_pdbs)
     if not os.path.isdir((plotdir := f"{inpaints.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
 
     # merge fastrelax options into poses_df
     fastdesign_pose_opts_df = pd.read_json(f"{args.input_dir}/rosetta_pose_opts.json").T.reset_index().rename(columns={0: "fastdesign_pose_opts"})
-    inpaints.poses_df = inpaints.poses_df.merge(fastrelax_opts, left_on="poses_description", right_on="index").drop(columns=["index"])
+    fastdesign_pose_opts_df["fastdesign_pose_opts"] = fastdesign_pose_opts_df["fastdesign_pose_opts"].str.replace("ref_fragments", f"{args.input_dir}/ref_fragments")
+    print(fastdesign_pose_opts_df.values)
+    inpaints.poses_df = inpaints.poses_df.merge(fastdesign_pose_opts_df, left_on="poses_description", right_on="index").drop(columns=["index"])
 
     if len(inpaints.poses_df) == len(inpaints.poses): print(f"Loading of Pose contigs into poses_df successful. Continuing to refinement.")
     else: raise ValueError(f"Merging of inpaint_opts into poses_df failed! Check if keys in inpaint_opts match with pose_names!")
@@ -50,7 +52,7 @@ def main(args):
         
         # run Constraint-Biased FastDesign RosettaScript
         fastdesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/refine.xml -beta -ex1 -ex2"
-        fastdesign = inpaints.rosetta("rosetta_scripts.default.linuxgccrelease", options=fastdesign_opts, pose_options=inpaints.poses_df["fast_design_pose_opts"].to_list(), n=args.num_fastdesign_outputs, prefix=f"{cycle_prefix}_fastdesign")
+        fastdesign = inpaints.rosetta("rosetta_scripts.default.linuxgccrelease", options=fastdesign_opts, pose_options=inpaints.poses_df["fastdesign_pose_opts"].to_list(), n=args.num_fastdesign_outputs, prefix=f"{cycle_prefix}_fastdesign")
 
         # Calculate Motif BB-Ca RMSD 
         fastdesign_rmsd = inpaints.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_dir, ref_motif=inpaints.poses_df["motif_res"].to_list(), target_motif=inpaints.poses_df["motif_res"].to_list(), metric_prefix=f"{cycle_prefix}", remove_layers=2)
