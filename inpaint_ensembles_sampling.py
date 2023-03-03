@@ -31,6 +31,21 @@ def parse_outfilter_args(scoreterm_str: str, weights_str: str, df: pd.DataFrame)
 
     return scoreterms, weights
 
+def extract_rosetta_pose_opts(input_data: pd.Series) -> str:
+    '''AAA'''
+    def collapse_dict_values(in_dict: dict) -> str:
+        return ",".join([str(y) for x in in_dict.values() for y in x])
+    native_file = f"-in:file:native ref_fragments/{input_data['poses_description']}.pdb"
+    script_vars = f"-parser:script_vars motif_res='{collapse_dict_values(input_data['motif_residues'])}' cat_res='{collapse_dict_values(input_data['fixed_residues'])}'"
+    return [" ".join([native_file, script_vars])]
+
+def write_rosetta_pose_opts_to_json(input_df: pd.DataFrame, path_to_json_file: str) -> str:
+    '''AAA'''
+    pose_opts_dict = {input_df.loc[index, "poses_description"]: extract_rosetta_pose_opts(input_df.loc[index]) for index in input_df.index}
+    with open(path_to_json_file, 'w') as f:
+        json.dump(pose_opts_dict, f)
+    return path_to_json_file
+
 def main(args):
     # print Status
     print(f"\n{'#'*50}\nRunning inpaint_ensembles.py on {args.input_dir}\n{'#'*50}\n")
@@ -145,6 +160,9 @@ def main(args):
 
     # Plot final stats of selected poses
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{results_dir}/final_esm_stats.png")
+
+    # write Rosetta Pose Options to a .json file:
+    ros_pose_opts = write_rosetta_pose_opts_to_json(ensembles.poses_df, path_to_json_file=f"{results_dir}/rosetta_pose_opts.json")
 
 if __name__ == "__main__":
     import argparse
