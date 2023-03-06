@@ -19,7 +19,7 @@ from iterative_refinement import *
 
 def parse_cycle_scoreterms(prefix: str, scoreterms:str, weights:str) -> tuple[str]:
     ''''''
-    return [prefix + x for x in scoreterms.split(",")], weights.split(",")
+    return [prefix + "_" + x for x in scoreterms.split(",")], [float(x) for x in weights.split(",")]
 
 def main(args):
     '''AAA'''
@@ -33,9 +33,10 @@ def main(args):
 
     # merge fastrelax options into poses_df
     fastdesign_pose_opts_df = pd.read_json(f"{args.input_dir}/rosetta_pose_opts.json").T.reset_index().rename(columns={0: "fastdesign_pose_opts"})
+    motif_res_df = pd.read_json(f"{args.input_dir}/motif_res.json").reset_index()
     fastdesign_pose_opts_df["fastdesign_pose_opts"] = fastdesign_pose_opts_df["fastdesign_pose_opts"].str.replace("ref_fragments", f"{args.input_dir}/ref_fragments")
-    print(fastdesign_pose_opts_df.values)
     inpaints.poses_df = inpaints.poses_df.merge(fastdesign_pose_opts_df, left_on="poses_description", right_on="index").drop(columns=["index"])
+    inpaints.poses_df = inpaints.poses_df.merge(motif_res_df, left_on="poses_description", right_on="index").drop(columns=["index"])
 
     if len(inpaints.poses_df) == len(inpaints.poses): print(f"Loading of Pose contigs into poses_df successful. Continuing to refinement.")
     else: raise ValueError(f"Merging of inpaint_opts into poses_df failed! Check if keys in inpaint_opts match with pose_names!")
@@ -55,16 +56,17 @@ def main(args):
         fastdesign = inpaints.rosetta("rosetta_scripts.default.linuxgccrelease", options=fastdesign_opts, pose_options=inpaints.poses_df["fastdesign_pose_opts"].to_list(), n=args.num_fastdesign_outputs, prefix=f"{cycle_prefix}_fastdesign")
 
         # Calculate Motif BB-Ca RMSD 
-        fastdesign_rmsd = inpaints.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_dir, ref_motif=inpaints.poses_df["motif_res"].to_list(), target_motif=inpaints.poses_df["motif_res"].to_list(), metric_prefix=f"{cycle_prefix}", remove_layers=2)
+        fastdesign_rmsd = inpaints.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_dir, ref_motif=inpaints.poses_df["motif_residues"].to_list(), target_motif=inpaints.poses_df["motif_residues"].to_list(), metric_prefix=f"{cycle_prefix}", remove_layers=2)
 
         # redesign Sequence with ProteinMPNN
-        mpnn_designs = inpaints.mpnn_design(mpnn_options="--num_seq_per_target={args.num_mpnn_seqs} --sampling_temp={args.mpnn_sampling_temp}", prefix=f"{cycle_prefix}_mpnn", fixed_positions_col="mpnn_fixedpos")
-        mpnn_filter = inpaints.filter_poses_by_score(args.num_esm_inputs, "mpnn_score", prefix="{cycle_prefix}_mpnn_seqfilter", remove_layer=1)
+        mpnn_designs = inpaints.mpnn_design(mpnn_options=f"--num_seq_per_target={args.num_mpnn_seqs} --sampling_temp={args.mpnn_sampling_temp}", prefix=f"{cycle_prefix}_mpnn", fixed_positions_col="fixed_residues")
+        mpnn_filter = inpaints.filter_poses_by_score(args.num_esm_inputs, "mpnn_score", prefix=f"{cycle_prefix}_mpnn_seqfilter", remove_layers=1)
 
         # predict sequences with ESMFold and calculate stats
         esm_preds = inpaints.predict_sequences(run_ESMFold, prefix=f"{cycle_prefix}_esm")
         esm_bb_ca_rmsd = inpaints.calc_bb_rmsd_dir(ref_pdb_dir=fastdesign, ref_chains=["A"], pose_chains=["A"], remove_layers=1, metric_prefix=f"{cycle_prefix}_esm")
-        esm_bb_ca_motif_rmsd =  inpaints.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_dir, ref_motif=inpaints.poses_df["motif_res"].to_list(), target_motif=inpaints.poses_df["motif_res"].to_list(), metric_prefix=f"{cycle_prefix}_esm_bb_ca", remove_layers=3)
+        esm_bb_ca_motif_rmsd = inpaints.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_dir, ref_motif=inpaints.poses_df["motif_residues"].to_list(), target_motif=inpaints.poses_df["motif_residues"].to_list(), metric_prefix=f"{cycle_prefix}_esm_bb_ca", remove_layers=3)
+        esm_catres_rmsd = inpaints.calc_motif_heavy_rmsd_dir(ref_pdb_dir=ref_dir, ref_motif=inpaints.poses_df["fixed_residues"].to_list(), target_motif=inpaints.poses_df["fixed_residues"].to_list(), metric_prefix=f"{cycle_prefix}_esm_catres", remove_layers=3)
 
         # filter down by desired scoreterms:
         cycle_scoreterms, cycle_scoreterm_weights = parse_cycle_scoreterms(cycle_prefix, args.cycle_filter_scoreterms, args.cycle_filter_scoreterm_weights)
@@ -72,16 +74,16 @@ def main(args):
 
         # if in last cycle, then do not reindex and do not filter!
         if i == args.cycles: break
-        cycle_filter = inpaints.filter_poses_by_score(args.num_fastdesign_inputs, f"{cycle_prefix}_esm_comp_score", prefix=f"{cycle_prefix}_esm_filter", remove_layer=3, plot=cycle_scoreterms)
+        cycle_filter = inpaints.filter_poses_by_score(args.num_fastdesign_inputs, f"{cycle_prefix}_esm_comp_score", prefix=f"{cycle_prefix}_esm_filter", remove_layers=3, plot=cycle_scoreterms)
 
         # reindex poses for next cycle
         reindexed = inpaints.reindex_poses(out_dir=f"{cycle_prefix}/reindexed_poses/", remove_layers=3)
     
-    cols = [f"{cycle_prefix}_esm_plddt", "{cycle_prefix}_esm_bb_ca_rmsd", "{cycle_prefix}_esm_bb_ca_motif_rmsd", f"{cycle_prefix}_esm_catres_motif_heavy_rmsd"]
+    cols = [f"{cycle_prefix}_esm_plddt", f"{cycle_prefix}_esm_bb_ca_rmsd", f"{cycle_prefix}_esm_bb_ca_motif_rmsd", f"{cycle_prefix}_esm_catres_motif_heavy_rmsd"]
     titles = ["ESM pLDDT", "ESM BB-Ca RMSD", "ESM Motif-Ca RMSD", "ESM Catres\nSidechain RMSD"]
     y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]"]
     dims = [(0,100), (0,15), (0,8), (0,8)]
-    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/esm_stats.png")
+    _ = plots.violinplot_multiple_cols(inpaints.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/esm_stats.png")
 
     print("Done")
 
@@ -105,7 +107,7 @@ if __name__ == "__main__":
     argparser.add_argument("--num_mpnn_seqs", type=int, default=20, help="Number of sequences to generate using ProteinMPNN.")
     argparser.add_argument("--mpnn_sampling_temp", type=float, default=0.1, help="Sampling Temperature for ProteinMPNN")
     argparser.add_argument("--num_esm_inputs", type=int, default=5, help="Number of Sequences per backbone that should be predicted by ProteinMPNN.")
-    argparser.add_argument("--cycle_filter_scoreterms", type=str, default="esm_plddt,esm_bb_ca_rmsd", help="Scoreterms that you want to filter the poses on during each cycle of refinement")
+    argparser.add_argument("--cycle_filter_scoreterms", type=str, default="esm_plddt,esm_bb_ca_motif_rmsd", help="Scoreterms that you want to filter the poses on during each cycle of refinement")
     argparser.add_argument("--cycle_filter_scoreterm_weights", type=str, default="-1,1", help="Weights for --cycle_filter_scoreterms. Both arguments need to have the same number of elements!")
 
     args = argparser.parse_args()
