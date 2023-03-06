@@ -6,3 +6,5 @@ models/__pycache*
 ./models/__pycache__/riff_diff_models.cpython-39.pyc
 utils/__pycache__/helix_randomization_tools.cpython-39.pyc
 models/__pycache__*
+rosetta/test_outs/
+rosetta/testing/
