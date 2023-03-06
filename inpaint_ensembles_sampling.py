@@ -164,6 +164,8 @@ def main(args):
     # write Rosetta Pose Options to a .json file:
     ros_pose_opts = write_rosetta_pose_opts_to_json(ensembles.poses_df, path_to_json_file=f"{results_dir}/rosetta_pose_opts.json")
     dumped = ensembles.dump_poses(f"{results_dir}/pdb_in/")
+    out_df = ensembles.poses_df[["poses_description", "fixed_residues", "motif_residues"]].set_index("poses_description")
+    out_df.to_json(f"{results_dir}/motif_res.json")
 
 if __name__ == "__main__":
     import argparse
