@@ -87,7 +87,7 @@ class PlottingTrajectory():
     def add_and_plot(self, data_list, label):
         ''''''
         self.add(data_list, label)
-        self.violin_plot()
+        self.violin_plot(out_path=self.location)
         return None
         
 def singular_violinplot(data: list, y_label: str, title: str, out_path:str=None,) -> None:
