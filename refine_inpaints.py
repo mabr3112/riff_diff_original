@@ -15,6 +15,7 @@ sys.path.append("/home/mabr3112/riff_diff")
 sys.path.append("/home/mabr3112/projects/iterative_refinement/")
 
 import utils.plotting as plots
+from utils.plotting import PlottingTrajectory
 from iterative_refinement import *
 
 def parse_cycle_scoreterms(prefix: str, scoreterms:str, weights:str) -> tuple[str]:
@@ -44,8 +45,14 @@ def main(args):
     # initial diversify?
     initial_diversify = inpaints.create_relax_decoys(relax_options="-constrain_relax_to_start_coords -beta -ex1 -ex2", n=args.num_fastdesign_inputs, prefix="initial_diversify")
 
-    # initialize DataFrame for plotting cycle trajectory:
-    cycle_df = pd.DataFrame()
+    # initialize PlottingTrajectory objects for storing plots. 
+    plot_dir = f"{inpaints.dir}/plots/"
+    esm_plddt_traj = PlottingTrajectory(y_label="ESMFold pLDDT", location=f"{plot_dir}/esm_plddt_trajectory.png", title="ESMFold Trajectory", dims=(0,100))
+    esm_bb_ca_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/esm_bb_ca_trajectory.png", title="ESMFold BB-Ca\nRMSD Trajectory", dims=(0,10))
+    esm_motif_ca_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/esm_motif_ca_trajectory.png", title="ESMFold Motif-Ca\nRMSD Trajectory", dims=(0,8))
+    esm_catres_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/esm_catres_rmsd_trajectory.png", title="ESMFold Motif\nSidechain RMSD Trajectory", dims=(0,8))
+    fastdesign_total_score_traj = PlottingTrajectory(y_label="Rosetta total score [REU]", location=f"{plot_dir}/rosetta_total_score_trajectory.png", title="FastDesign Total Score Trajectory")
+    fastdesign_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/fastdesign_rmsd_traj.png", title="FastDesign Motif RMSD Trajectory")
 
     # refinement cycles:
     for i in range(1, args.cycles + 1):
@@ -57,6 +64,13 @@ def main(args):
 
         # Calculate Motif BB-Ca RMSD 
         fastdesign_rmsd = inpaints.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_dir, ref_motif=inpaints.poses_df["motif_residues"].to_list(), target_motif=inpaints.poses_df["motif_residues"].to_list(), metric_prefix=f"{cycle_prefix}", remove_layers=2)
+        fastdesign_rmsd_traj.add_and_plot(inpaints.poses_df[f"{cycle_prefix}_motif_rmsd"].to_list(), cycle_prefix)
+        fastdesign_total_score_traj.add_and_plot(inpaints.poses_df[f"{cycle_prefix}_fastdesign_total_score"], cycle_prefix)
+
+        # calculate mixed score between total-score and motif_rmsd:
+        fd_st = [f"{cycle_prefix}_fastdesign_total_score", f"{cycle_prefix}_motif_rmsd"]
+        comp_score = inpaints.calc_composite_score(f"{cycle_prefix}_fastdesign_comp_score", fd_st, [1,1])
+        fd_filter = inpaints.filter_poses_by_score(10, f"{cycle_prefix}_fastdesign_comp_score", prefix=f"{cycle_prefix}_fastdesign_filter", remove_layers=2, plot=fd_st)
 
         # redesign Sequence with ProteinMPNN
         mpnn_designs = inpaints.mpnn_design(mpnn_options=f"--num_seq_per_target={args.num_mpnn_seqs} --sampling_temp={args.mpnn_sampling_temp}", prefix=f"{cycle_prefix}_mpnn", fixed_positions_col="fixed_residues")
@@ -67,6 +81,12 @@ def main(args):
         esm_bb_ca_rmsd = inpaints.calc_bb_rmsd_dir(ref_pdb_dir=fastdesign, ref_chains=["A"], pose_chains=["A"], remove_layers=1, metric_prefix=f"{cycle_prefix}_esm")
         esm_bb_ca_motif_rmsd = inpaints.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_dir, ref_motif=inpaints.poses_df["motif_residues"].to_list(), target_motif=inpaints.poses_df["motif_residues"].to_list(), metric_prefix=f"{cycle_prefix}_esm_bb_ca", remove_layers=3)
         esm_catres_rmsd = inpaints.calc_motif_heavy_rmsd_dir(ref_pdb_dir=ref_dir, ref_motif=inpaints.poses_df["fixed_residues"].to_list(), target_motif=inpaints.poses_df["fixed_residues"].to_list(), metric_prefix=f"{cycle_prefix}_esm_catres", remove_layers=3)
+
+        # Plot trajectory:
+        esm_plddt_traj.add_and_plot(inpaints.poses_df[f"{cycle_prefix}_esm_plddt"], cycle_prefix)
+        esm_bb_ca_rmsd_traj.add_and_plot(inpaints.poses_df[f"{cycle_prefix}_esm_bb_ca_rmsd"], cycle_prefix)
+        esm_motif_ca_rmsd_traj.add_and_plot(inpaints.poses_df[f"{cycle_prefix}_esm_bb_ca_motif_rmsd"], cycle_prefix)
+        esm_catres_rmsd_traj.add_and_plot(inpaints.poses_df[f"{cycle_prefix}_esm_catres_motif_heavy_rmsd"], cycle_prefix)
 
         # filter down by desired scoreterms:
         cycle_scoreterms, cycle_scoreterm_weights = parse_cycle_scoreterms(cycle_prefix, args.cycle_filter_scoreterms, args.cycle_filter_scoreterm_weights)
@@ -102,9 +122,9 @@ if __name__ == "__main__":
     # cyclic refinement
     argparser.add_argument("--num_fastdesign_outputs", type=int, default=5, help="Number of poses that should be kept after FastDesign.")
     argparser.add_argument("--num_fastdesign_inputs", type=int, default=5, help="Number of inputs into fastdesign for each cycle.")
-    argparser.add_argument("--num_mpnn_seqs", type=int, default=20, help="Number of sequences to generate using ProteinMPNN.")
+    argparser.add_argument("--num_mpnn_seqs", type=int, default=50, help="Number of sequences to generate using ProteinMPNN.")
     argparser.add_argument("--mpnn_sampling_temp", type=float, default=0.1, help="Sampling Temperature for ProteinMPNN")
-    argparser.add_argument("--num_esm_inputs", type=int, default=5, help="Number of Sequences per backbone that should be predicted by ProteinMPNN.")
+    argparser.add_argument("--num_esm_inputs", type=int, default=25, help="Number of Sequences per backbone that should be predicted by ProteinMPNN.")
     argparser.add_argument("--cycle_filter_scoreterms", type=str, default="esm_plddt,esm_bb_ca_motif_rmsd", help="Scoreterms that you want to filter the poses on during each cycle of refinement")
     argparser.add_argument("--cycle_filter_scoreterm_weights", type=str, default="-1,1", help="Weights for --cycle_filter_scoreterms. Both arguments need to have the same number of elements!")
 
