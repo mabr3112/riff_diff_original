@@ -87,8 +87,6 @@ def main(args):
 
     print("Done")
 
-
-
 if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
