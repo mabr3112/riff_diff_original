@@ -16,6 +16,7 @@ sys.path.append("/home/mabr3112/projects/iterative_refinement/")
 
 import utils.plotting as plots
 from utils.plotting import PlottingTrajectory
+import utils.pymol_tools
 from iterative_refinement import *
 
 def parse_cycle_scoreterms(prefix: str, scoreterms:str, weights:str) -> tuple[str]:
@@ -25,7 +26,7 @@ def parse_cycle_scoreterms(prefix: str, scoreterms:str, weights:str) -> tuple[st
 def main(args):
     '''AAA'''
     logging.info(f"Running refine_inpaints.py on {args.input_dir}")
-    ref_dir = f"{args.input_dir}/ref_fragments"
+    ref_dir = f"{args.input_dir}/ref_fragments/"
 
     # parse poses:
     if not (input_pdbs := glob(f"{args.input_dir}/pdb_in/*.pdb")): raise FileNotFoundError(f"No *.pdb files found at {args.input_dir}")
@@ -38,6 +39,9 @@ def main(args):
     fastdesign_pose_opts_df["fastdesign_pose_opts"] = fastdesign_pose_opts_df["fastdesign_pose_opts"].str.replace("ref_fragments", f"{args.input_dir}/ref_fragments")
     inpaints.poses_df = inpaints.poses_df.merge(fastdesign_pose_opts_df, left_on="poses_description", right_on="index").drop(columns=["index"])
     inpaints.poses_df = inpaints.poses_df.merge(motif_res_df, left_on="poses_description", right_on="index").drop(columns=["index"])
+
+    # set reference poses into poses_df
+    inpaints.poses_df["ref_poses"] = ref_dir + inpaints.poses_df["poses_description"].str + ".pdb"
 
     if len(inpaints.poses_df) == len(inpaints.poses): print(f"Loading of Pose contigs into poses_df successful. Continuing to refinement.")
     else: raise ValueError(f"Merging of inpaint_opts into poses_df failed! Check if keys in inpaint_opts match with pose_names!")
@@ -99,11 +103,23 @@ def main(args):
         # reindex poses for next cycle
         reindexed = inpaints.reindex_poses(out_dir=f"{cycle_prefix}/reindexed_poses/", remove_layers=3)
     
+    # plot final results   
     cols = [f"{cycle_prefix}_esm_plddt", f"{cycle_prefix}_esm_bb_ca_rmsd", f"{cycle_prefix}_esm_bb_ca_motif_rmsd", f"{cycle_prefix}_esm_catres_motif_heavy_rmsd"]
     titles = ["ESM pLDDT", "ESM BB-Ca RMSD", "ESM Motif-Ca RMSD", "ESM Catres\nSidechain RMSD"]
     y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]"]
     dims = [(0,100), (0,15), (0,8), (0,8)]
     _ = plots.violinplot_multiple_cols(inpaints.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/esm_stats.png")
+    
+    # create pymol alignment script:
+    results_dir = f"{inpaints.dir}/results" + "/"
+    out_filter_comp_score = inpaints.calc_composite_score("out_filter_comp_score", [f"{cycle_prefix}_esm_plddt", f"{cycle_prefix}_esm_bb_ca_rmsd"], [-1,1])
+    top_pdb_df = inpaints.poses_df.sort_values(by="out_filter_comp_score").head(args.top_n)
+    pml_script_path = utils.pymol_tools.pymol_alignment_scriptwriter(top_pdb_df, scoreterm="out_filter_comp_score", top_n=top_n, path_to_script=f"{results_dir}/align.pml", pose_col="poses_description", ref_pose_col="ref_poses", motif_res_col="motif_residues", fixed_res_col="fixed_residues", ref_motif_res_col="motif_residues", ref_fixed_res_col="fixed_residues")
+
+    # copy top pdbs into results directory.
+    for idx in top_pdb_df.index:
+        shutil.copy(top_pdb_df.loc[idx]["ref_poses"], results_dir)
+        shutil.copy(top_pdb_df.loc[idx][f"{cycle_prefix}_esm_location"], results_dir)
 
     print("Done")
 
@@ -127,6 +143,9 @@ if __name__ == "__main__":
     argparser.add_argument("--num_esm_inputs", type=int, default=25, help="Number of Sequences per backbone that should be predicted by ProteinMPNN.")
     argparser.add_argument("--cycle_filter_scoreterms", type=str, default="esm_plddt,esm_bb_ca_motif_rmsd", help="Scoreterms that you want to filter the poses on during each cycle of refinement")
     argparser.add_argument("--cycle_filter_scoreterm_weights", type=str, default="-1,1", help="Weights for --cycle_filter_scoreterms. Both arguments need to have the same number of elements!")
+
+    # final results
+    argparser.add_argument("--top_n", type=int, default=50, help="Number of top outputs for plotting.")
 
     args = argparser.parse_args()
     main(args)
