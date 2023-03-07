@@ -44,7 +44,7 @@ def main(args):
     # initial diversify?
     initial_diversify = inpaints.create_relax_decoys(relax_options="-constrain_relax_to_start_coords -beta -ex1 -ex2", n=args.num_fastdesign_inputs, prefix="initial_diversify")
 
-    # initialize DataFrame for plotting cycle trajectory:
+    # initialize PlottingTrajectory objects for storing plots. 
     cycle_df = pd.DataFrame()
 
     # refinement cycles:
