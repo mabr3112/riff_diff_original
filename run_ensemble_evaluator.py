@@ -132,7 +132,7 @@ def combine_lists(col_a, col_b):
 def flatten_list_of_tuples(nested_list):
     return list(chain(*nested_list))
 
-def generate_pairs_from_array(input_array: list[list]) -> list:
+def generate_pairs_from_array(input_array: "list[list]") -> list:
     ''''''
     # sample column pairings
     column_pairings = generate_pairs(input_array, double_pairs=True)
@@ -259,7 +259,7 @@ def rescale_dataset(input_data: np.array, scaling_parameters: dict) -> np.array:
     return scaled_data
 
 
-def add_linker_lengths_to_preds(input_array: np.array, linker_lengths: list[int]) -> np.array:
+def add_linker_lengths_to_preds(input_array: np.array, linker_lengths: "list[int]") -> np.array:
     '''asdf'''
     n_linkers = len(linker_lengths)
     reshaped_array = np.reshape(input_array, (int(len(input_array)/n_linkers), n_linkers))
@@ -297,11 +297,11 @@ def calc_pairings_quality_scores(plddt_pairings_dict, rmsd_pairings_dict, distan
     logging.info(f"Calculated Structure-Quality Scores for {len(pairings)} Pairings in {round(time() - t, 3)} Seconds.")
     return quality_scores_dict
 
-def adjust_qs_for_linker_length(qs_list: list[tuple], tolerance:int=2, strength:float=0.5) -> list[tuple]:
+def adjust_qs_for_linker_length(qs_list: "list[tuple]", tolerance:int=2, strength:float=0.5) -> "list[tuple]":
     '''AAA'''
     return [(x[0] - x[0] * (np.maximum(x[1]-tolerance,0)*strength/10), x[1]) for x in qs_list]
 
-def reverse_adjust_qs_for_linker_length(qs_list: list[tuple], tolerance:int=2, strength:float=0.5) -> list[tuple]:
+def reverse_adjust_qs_for_linker_length(qs_list: "list[tuple]", tolerance:int=2, strength:float=0.5) -> "list[tuple]":
     '''AAA'''
     return [(x[0]/(1 - (np.maximum(x[1]-tolerance,0)*strength/10)), x[1]) for x in qs_list]
 
@@ -340,7 +340,7 @@ def compile_nodes_from_coords(coords_row, conversion_dict: dict) -> list:
     '''AAA'''
     return [(conversion_dict[coord], coord) for coord in coords_row]
 
-def old_create_paths_from_nodes(nodes: list[tuple]) -> dict:
+def old_create_paths_from_nodes(nodes: "list[tuple]") -> dict:
     '''AAA'''
     return {"-".join([x[0] for x in path]): convert_paths([x[1] for x in path]) for path in permutations(nodes)}
 
@@ -454,7 +454,7 @@ def compile_inpaint_seq(fragments, fragment_dict):
         
     return ",".join(inpaint_str_l)
 
-def compile_translate_str(fragments: list[str], fragment_dict: dict) -> str:
+def compile_translate_str(fragments: "list[str]", fragment_dict: dict) -> str:
     '''AAA'''
     translate_str_l = list()
     for i, frag in enumerate(fragments):
@@ -462,7 +462,7 @@ def compile_translate_str(fragments: list[str], fragment_dict: dict) -> str:
         translate_str_l.append(f"{chr(ord('A')+i)}1-{length},translate_sampling_magnitude")
     return ":".join(translate_str_l)
 
-def compile_rotate_str(fragments: list[str], fragment_dict: dict) -> str:
+def compile_rotate_str(fragments: "list[str]", fragment_dict: dict) -> str:
     '''AAA'''
     rotate_str_l = list()
     for i, frag in enumerate(fragments):
