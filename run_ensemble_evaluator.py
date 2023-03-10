@@ -409,7 +409,6 @@ def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict
     
     return out_pdb_name
 
-
 ############################ Inpainting Contigs Writers ####################################
 def get_fragments(input_series: pd.Series) -> list:
     '''Extracts fragments from PD.Series'''
@@ -423,7 +422,25 @@ def get_linkers(input_series: pd.Series) -> list:
     '''Collect linkers (linker lengths) from input_series'''
     return [str(l) for l in input_series[[x for x in input_series.index if x.endswith("linker")]].to_list()]
 
-def get_flankers(fragments: list, linkers: list, max_res: int) -> tuple:
+def divide_flanking_residues(residual: int, flanking: str) -> tuple:
+    ''''''
+    def split_flankers(residual, flanking) -> tuple:
+        ''''''
+        cterm = residual // 2
+        nterm = residual - cterm
+        return nterm, cterm
+
+    residual = int(residual)
+    if residual < 6 or flanking == "split":
+        return split_flankers(residual, flanking)
+    elif flanking == "nterm":
+        return residual-3, 3
+    elif flanking == "cterm":
+        return 3, residual-3
+    else:
+        raise ValueError(f"Paramter <flanking> can only be 'split', 'nterm', or 'cterm'. flanking: {flanking}")
+
+def get_flankers(fragments: list, linkers: list, max_res: int, flanking: str) -> tuple:
     '''Calculate length of terminal flanker regions for inpainting.'''
     def get_frag_length(fragment):
         return int(fragment.split("-")[-1])
@@ -431,9 +448,8 @@ def get_flankers(fragments: list, linkers: list, max_res: int) -> tuple:
     # calculate length of all fragments, linkers and then assign flanker length:
     all_frag_res = sum([int(get_frag_length(frag)) for frag in fragments])
     linker_length = sum([int(x) for x in linkers])
-    cterm = (residual := max_res - all_frag_res - linker_length) // 2
-    nterm = residual - cterm
-    return nterm, cterm
+    residual = max_res - linker_length - all_frag_res
+    return divide_flanking_residues(residual=residual, flanking=flanking)
 
 def compile_contig_string(fragments: list, linkers: list, nterm:str=None, cterm:str=None) -> str:
     '''Generate contig string for inpainting (RFDesign)'''
@@ -470,13 +486,13 @@ def compile_rotate_str(fragments: "list[str]", fragment_dict: dict) -> str:
         rotate_str_l.append(f"{chr(ord('A')+i)}1-{length},rotate_sampling_degrees")
     return ":".join(rotate_str_l)
 
-def compile_inpaint_pose_opts(input_series: pd.Series, fragment_dict: dict, max_length=74) -> str:
+def compile_inpaint_pose_opts(input_series: pd.Series, fragment_dict: dict, max_length=74, flanking="split") -> str:
     '''Compile and write pose options for inpainting'''
     # Calculate fragment_contigs, linkers and flankers for inpainting contig:
     fragments = get_fragments(input_series)
     fragment_contigs = get_fragments_contigs(fragments, fragment_dict)
     linkers = get_linkers(input_series)
-    nterm, cterm = get_flankers(fragment_contigs, linkers, max_length)
+    nterm, cterm = get_flankers(fragment_contigs, linkers, max_length, flanking=flanking)
     
     # compile contig_string and inpaint_seq string:
     contig_str = compile_contig_string(fragment_contigs, linkers, nterm, cterm)
@@ -489,22 +505,22 @@ def compile_inpaint_pose_opts(input_series: pd.Series, fragment_dict: dict, max_
 
 def write_inpaint_contigs_to_json(input_df: pd.DataFrame, json_path: str, fragment_dict: dict, max_length: int) -> dict:
     '''AAA'''
-    out_dict = {index: compile_inpaint_pose_opts(input_df.loc[index], fragment_dict=fragment_dict, max_length=max_length) for index in input_df.index}
+    out_dict = {index: compile_inpaint_pose_opts(input_df.loc[index], fragment_dict=fragment_dict, max_length=max_length, flanking="split") for index in input_df.index}
     with open(json_path, 'w') as f:
         json.dump(out_dict, f)
     return out_dict
 
 def get_motif_res(input_series: pd.Series, fragment_dict: dict) -> dict:
     '''Get Motif for fixed residues from series.'''
-    return [{f"{chr(ord('A')+(i))}": list(range(1, fragment_dict[fragment]["frag_length"]+1)) for i, fragment in enumerate(get_fragments(input_series))}]
+    return {f"{chr(ord('A')+(i))}": list(range(1, fragment_dict[fragment]["frag_length"]+1)) for i, fragment in enumerate(get_fragments(input_series))}
 
 def get_fixed_res(input_series: pd.Series, fragment_dict: dict) -> dict:
     '''Get Motif for motif residues from series.'''
-    return [{f"{chr(ord('A')+(i))}": [fragment_dict[fragment]["res_num"]] for i, fragment in enumerate(get_fragments(input_series))}]
+    return {f"{chr(ord('A')+(i))}": [fragment_dict[fragment]["res_num"]] for i, fragment in enumerate(get_fragments(input_series))}
 
 def get_res_identity(input_series: pd.Series, fragment_dict: dict) -> dict:
     ''''''
-    return [{f"{chr(ord('A')+(i))}{fragment_dict[fragment]['res_num']}": fragment_dict[fragment]["identity"] for i, fragment in enumerate(get_fragments(input_series))}]
+    return {f"{chr(ord('A')+(i))}{fragment_dict[fragment]['res_num']}": fragment_dict[fragment]["identity"] for i, fragment in enumerate(get_fragments(input_series))}
 
 def write_fixedres_to_json(input_df: pd.DataFrame, fragments_dict: dict, json_path: str) -> dict:
     '''AAA'''
@@ -773,7 +789,6 @@ def main(args):
     logging.info(f"Filtered {len(full_path_df) - len(path_plddt_df)} paths with linker distance higher than {args.max_linker_distance}")
     top_path_df = filter_paths(path_plddt_df, min_quality=0.0000000000001, max_linker_length=args.max_linker_length)
     logging.info(f"Filtered {len(path_plddt_df)-len(top_path_df)} paths with quality scores of ~0")
-    #calc_path_mean_plddt(top_path_df)
 
     # Extract top (args.max_num) rows from the filtered Path DataFrame.
     selected_path_df = sample_from_path_df(top_path_df, n=args.max_num, random_sample_subset_fraction=args.sample_from_subset_fraction)
@@ -816,14 +831,14 @@ def main(args):
     logging.info(f"Writing inpaint pose options to {inpaint_contigs_path}")
     contigs_dict = write_inpaint_contigs_to_json(selected_path_df, inpaint_contigs_path, fragment_dict=unique_fragments_dict, max_length=args.pdb_length)
 
-    # write fixedres and motif_res json files for Inpainting:
-    fixedres_filename = f"{args.output_dir}/fixed_res.json"
-    motif_res_filename = f"{args.output_dir}/motif_res.json"
-    logging.info(f"Writing motif and fixed residue dicts to json files {fixedres_filename} and {motif_res_filename}")
-    fixedres = write_fixedres_to_json(selected_path_df, unique_fragments_dict, fixedres_filename)
-    motif_res = write_motif_res_to_json(selected_path_df, unique_fragments_dict, motif_res_filename)
-    motif_identities = write_residue_identities_to_json(selected_path_df, unique_fragments_dict, (res_ids_filename := f"{args.output_dir}/res_identities.json"))
-    
+    # compile motif_residues, fixed_residues and catres_identities for inpainting:
+    logging.info(f"Compiling motif_residues, fixed_residues and catres_identities for inpainting.")
+    selected_fragments = selected_path_df.index
+    fixedres_df = pd.DataFrame.from_dict({"fixed_residues": {index: get_fixed_res(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
+    motif_res_df = pd.DataFrame.from_dict({"motif_residues": {index: get_motif_res(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
+    motif_identities_df = pd.DataFrame.from_dict({"catres_identities": {index: get_res_identity(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
+    selected_path_df = selected_path_df.join([fixedres_df, motif_res_df, motif_identities_df, pd.DataFrame.from_dict({"inpainting_pose_opts": contigs_dict})])
+
     # store selected paths DataFrame
     scores_path = f"{args.output_dir}/selected_paths.json"
     logging.info(f"Storing selected path scores at {scores_path}")

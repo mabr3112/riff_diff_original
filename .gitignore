@@ -8,3 +8,5 @@ utils/__pycache__/helix_randomization_tools.cpython-39.pyc
 models/__pycache__*
 rosetta/test_outs/
 rosetta/testing/
+jupyter_testing
+jpt_test.ipynb
