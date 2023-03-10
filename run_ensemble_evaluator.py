@@ -529,7 +529,7 @@ def write_residue_identities_to_json(input_df: pd.DataFrame, fragments_dict: dic
 
 def main(args):
     ### Code ####
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}/log.txt")
+    if not os.path.isdir(args.output_dir): os.makedirs(args.output_dir, exist_ok=True)
 
     if os.environ.get('SLURM_SUBMIT_DIR'):
         script_dir = "/home/mabr3112/riff_diff/"
@@ -537,6 +537,8 @@ def main(args):
         script_dir = os.path.dirname(os.path.abspath(__file__))
     scaling_params_file = f"{script_dir}/models/scaling_params_10k2.json"
     path_to_fragment = f"{script_dir}/utils/helix.pdb"
+    
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}/log.txt")
 
     # load input data
     logging.info(f"Loading fragments from ensemble file {args.input_dir}")
@@ -840,19 +842,19 @@ if __name__ == "__main__":
     argparser.add_argument("--output_dir", type=str, required=True, help="Path to the output directory where the .pdb files and options for inpainting should be written to.")
     
     # PDB Options
-    argparser.add_argument("--max_num", type=int, default=100, help="Number of pdb-files that will be created by pathsearch.")
+    argparser.add_argument("--max_num", type=int, default=50, help="Number of pdb-files that will be created by pathsearch.")
     argparser.add_argument("--pdb_length", type=int, default=69, help="Maximum length of the pdb-files that will be inpainted.")
 
     # Filter Options
     argparser.add_argument("--max_linker_length", type=int, default=10, help="Maximum length of linkers that the fragments should be connected with.")
-    argparser.add_argument("--short_linker_preference", type=float, default=0.5, help="Strength for how much short linkers should be upweighted in scoring.")
-    argparser.add_argument("--max_linker_distance", type=float, default=15, help="Maximum Distance that the linker should have.")
+    argparser.add_argument("--short_linker_preference", type=float, default=0.01, help="Strength for how much short linkers should be upweighted in scoring.")
+    argparser.add_argument("--max_linker_distance", type=float, default=13, help="Maximum Distance that the linker should have.")
     argparser.add_argument("--weight_rotprob", type=float, default=1, help="Strength of the rotamer probability weight for filtering")
-    argparser.add_argument("--weight_structure_quality", type=float, default=3, help="Strength of the structure quality weight for filtering")
-    argparser.add_argument("--sample_from_subset_fraction", type=float, default=0, help="Take random sample from top <subset> rows of DataFrame.")
+    argparser.add_argument("--weight_structure_quality", type=float, default=1, help="Strength of the structure quality weight for filtering")
+    argparser.add_argument("--sample_from_subset_fraction", type=float, default=0.02, help="Take random sample from top <subset> rows of DataFrame.")
 
     # Structure Quality
-    argparser.add_argument("--plddt_threshold", type=float, default=0.7, help="Threshold for filtering inpaint plddts during quality-score calculation")
+    argparser.add_argument("--plddt_threshold", type=float, default=0, help="Threshold for filtering inpaint plddts during quality-score calculation")
     argparser.add_argument("--rmsd_threshold", type=float, default=0.2, help="Threshold tolerance for RMSD during quality-score calculation")
     argparser.add_argument("--rmsd_strength", type=float, default=1, help="Strength for RMSD filtering if RMSD is above the Threshold. For quality-score calculation")
     args = argparser.parse_args()

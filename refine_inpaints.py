@@ -41,7 +41,7 @@ def main(args):
     inpaints.poses_df = inpaints.poses_df.merge(motif_res_df, left_on="poses_description", right_on="index").drop(columns=["index"])
 
     # set reference poses into poses_df
-    inpaints.poses_df["ref_poses"] = ref_dir + inpaints.poses_df["poses_description"].str + ".pdb"
+    inpaints.poses_df["ref_poses"] = ref_dir + inpaints.poses_df["poses_description"] + ".pdb"
 
     if len(inpaints.poses_df) == len(inpaints.poses): print(f"Loading of Pose contigs into poses_df successful. Continuing to refinement.")
     else: raise ValueError(f"Merging of inpaint_opts into poses_df failed! Check if keys in inpaint_opts match with pose_names!")
@@ -103,6 +103,11 @@ def main(args):
         # reindex poses for next cycle
         reindexed = inpaints.reindex_poses(out_dir=f"{cycle_prefix}/reindexed_poses/", remove_layers=3)
     
+    # final filter:
+    final_filter_st = [f"{cycle_prefix}_esm_plddt", f"{cycle_prefix}_esm_bb_ca_motif_rmsd", f"{cycle_prefix}_esm_catres_motif_heavy_rmsd"]
+    final_filter_comp_score = inpaints.calc_composite_score("final_comp_score", final_filter_st, [-0.8,1,1])
+    final_filter = inpaints.filter_poses_by_score(5, "final_comp_score", prefix="final_results_filter", remove_layers=3, plot=final_filter_st)
+
     # plot final results   
     cols = [f"{cycle_prefix}_esm_plddt", f"{cycle_prefix}_esm_bb_ca_rmsd", f"{cycle_prefix}_esm_bb_ca_motif_rmsd", f"{cycle_prefix}_esm_catres_motif_heavy_rmsd"]
     titles = ["ESM pLDDT", "ESM BB-Ca RMSD", "ESM Motif-Ca RMSD", "ESM Catres\nSidechain RMSD"]
@@ -111,10 +116,10 @@ def main(args):
     _ = plots.violinplot_multiple_cols(inpaints.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/esm_stats.png")
     
     # create pymol alignment script:
-    results_dir = f"{inpaints.dir}/results" + "/"
+    os.makedirs((results_dir := f"{inpaints.dir}/results" + "/"), exist_ok=True)
     out_filter_comp_score = inpaints.calc_composite_score("out_filter_comp_score", [f"{cycle_prefix}_esm_plddt", f"{cycle_prefix}_esm_bb_ca_rmsd"], [-1,1])
     top_pdb_df = inpaints.poses_df.sort_values(by="out_filter_comp_score").head(args.top_n)
-    pml_script_path = utils.pymol_tools.pymol_alignment_scriptwriter(top_pdb_df, scoreterm="out_filter_comp_score", top_n=top_n, path_to_script=f"{results_dir}/align.pml", pose_col="poses_description", ref_pose_col="ref_poses", motif_res_col="motif_residues", fixed_res_col="fixed_residues", ref_motif_res_col="motif_residues", ref_fixed_res_col="fixed_residues")
+    pml_script_path = utils.pymol_tools.pymol_alignment_scriptwriter(top_pdb_df, scoreterm="out_filter_comp_score", top_n=args.top_n, path_to_script=f"{results_dir}/align.pml", pose_col="poses_description", ref_pose_col="ref_poses", motif_res_col="motif_residues", fixed_res_col="fixed_residues", ref_motif_res_col="motif_residues", ref_fixed_res_col="fixed_residues")
 
     # copy top pdbs into results directory.
     for idx in top_pdb_df.index:
