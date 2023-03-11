@@ -111,7 +111,7 @@ def main(args):
     ensembles.poses_df["inpainting_pose_opts"] = ensembles.poses_df["inpainting_pose_opts"].str.replace("rotate_sampling_degrees", str(args.rotation_sampling_degrees))
 
     # change cterm and nterm flankers according to input args.
-    if flanking: ensembles.poses_df["inpainting_pose_opts"] = [adjust_flanking(inpainting_pose_opts_str, args.flanking, args.total_flanker_length) for inpainting_pose_opts_str in ensembles.poses_df["inpainting_pose_opts"].to_list()]    
+    if args.flanking: ensembles.poses_df["inpainting_pose_opts"] = [adjust_flanking(inpainting_pose_opts_str, args.flanking, args.total_flanker_length) for inpainting_pose_opts_str in ensembles.poses_df["inpainting_pose_opts"].to_list()]    
 
     # Check if merger was successful:
     if len(ensembles.poses_df) == len(ensembles.poses): print(f"Loading of Pose contigs into poses_df successful. Continuing to inpainting.")
