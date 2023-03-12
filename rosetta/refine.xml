@@ -82,7 +82,7 @@
 		<Add mover_name="fastdesign_cst" />
 		<Add mover_name="pmm" />
 		Add mover_name="mc_packmin" />
-		<Add mover_name="sequence_metric" />
+		Add mover_name="sequence_metric" />
 	</PROTOCOLS>
 	<OUTPUT scorefxn="beta_cst" />
   /</ROSETTASCRIPTS>

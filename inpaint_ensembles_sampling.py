@@ -31,15 +31,18 @@ def divide_flanking_residues(residual: int, flanking: str) -> tuple:
 
 def adjust_flanking(inpaint_pose_opts: str, flanking_type: str, total_flanker_length:int=None) -> str:
     '''AAA'''
+    print("function_start")
     def get_contigs_str(inpaint_opts: str) -> str:
         return [x for x in inpaint_opts.split(" --") if x.startswith("--contigs")][0].split()[1]
     
     # extract contig from contigs_str
     contig = get_contigs_str(inpaint_pose_opts)
+    print(contig)
     
     # extract flankings and middle part
     csplit = contig.split(",")
     og_nterm, middle, og_cterm = int(csplit[0]), ",".join(csplit[1:-1]), int(csplit[-1])
+    print(middle)
     
     # readjust flankings according to flanking_type and max_pdb_length
     pdb_length = total_flanker_length or og_nterm+og_cterm
@@ -47,6 +50,10 @@ def adjust_flanking(inpaint_pose_opts: str, flanking_type: str, total_flanker_le
     
     # reassemble contig string and replace with inpaint pose opts.
     reassembled = f"{nterm},{middle},{cterm}"
+    print(reassembled)
+    output_inpaint_pose_opts = inpaint_pose_opts.replace(contig, reassembled)
+    print(output_inpaint_pose_opts)
+    print("function end")
     return inpaint_pose_opts.replace(contig, reassembled)
 
 def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, motif_prefix: str, out_pdb_path=None) -> list[str]:
@@ -85,10 +92,6 @@ def write_rosetta_pose_opts_to_json(input_df: pd.DataFrame, path_to_json_file: s
         json.dump(pose_opts_dict, f)
     return path_to_json_file
 
-def adjust_flanking(inpaint_pose_opts: str, flanking_type: str, max_pdb_length:int=None) -> str:
-    '''AAA'''
-    return 
-
 def main(args):
     # print Status
     print(f"\n{'#'*50}\nRunning inpaint_ensembles.py on {args.input_dir}\n{'#'*50}\n")
@@ -109,9 +112,11 @@ def main(args):
     # replace translation_magnitude and rotation_degrees in pose opts with arguments from commandline:
     ensembles.poses_df["inpainting_pose_opts"] = ensembles.poses_df["inpainting_pose_opts"].str.replace("translate_sampling_magnitude", str(args.translation_sampling_magnitude))
     ensembles.poses_df["inpainting_pose_opts"] = ensembles.poses_df["inpainting_pose_opts"].str.replace("rotate_sampling_degrees", str(args.rotation_sampling_degrees))
-
+    
+    print(ensembles.poses_df.iloc[0]["inpainting_pose_opts"])
     # change cterm and nterm flankers according to input args.
     if args.flanking: ensembles.poses_df["inpainting_pose_opts"] = [adjust_flanking(inpainting_pose_opts_str, args.flanking, args.total_flanker_length) for inpainting_pose_opts_str in ensembles.poses_df["inpainting_pose_opts"].to_list()]    
+    print(ensembles.poses_df.iloc[0]["inpainting_pose_opts"])
 
     # Check if merger was successful:
     if len(ensembles.poses_df) == len(ensembles.poses): print(f"Loading of Pose contigs into poses_df successful. Continuing to inpainting.")
