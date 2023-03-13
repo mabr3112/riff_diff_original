@@ -25,6 +25,9 @@ def parse_cycle_scoreterms(prefix: str, scoreterms:str, weights:str) -> tuple[st
 
 def main(args):
     '''AAA'''
+    # define directory of Repo ():
+    script_dir = "/home/mabr3112/riff_diff/"
+
     logging.info(f"Running refine_inpaints.py on {args.input_dir}")
     ref_dir = f"{args.input_dir}/ref_fragments/"
 
@@ -63,7 +66,7 @@ def main(args):
         cycle_prefix = f"cycle_{str(i).zfill(4)}"
         
         # run Constraint-Biased FastDesign RosettaScript
-        fastdesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/refine.xml -beta -ex1 -ex2"
+        fastdesign_opts = f"-parser:protocol {script_dir}/rosetta/{args.fastdesign_script} -beta -ex1 -ex2"
         fastdesign = inpaints.rosetta("rosetta_scripts.default.linuxgccrelease", options=fastdesign_opts, pose_options=inpaints.poses_df["fastdesign_pose_opts"].to_list(), n=args.num_fastdesign_outputs, prefix=f"{cycle_prefix}_fastdesign")
 
         # Calculate Motif BB-Ca RMSD 
@@ -74,7 +77,7 @@ def main(args):
         # calculate mixed score between total-score and motif_rmsd:
         fd_st = [f"{cycle_prefix}_fastdesign_total_score", f"{cycle_prefix}_motif_rmsd"]
         comp_score = inpaints.calc_composite_score(f"{cycle_prefix}_fastdesign_comp_score", fd_st, [1,1])
-        fd_filter = inpaints.filter_poses_by_score(10, f"{cycle_prefix}_fastdesign_comp_score", prefix=f"{cycle_prefix}_fastdesign_filter", remove_layers=2, plot=fd_st)
+        fd_filter = inpaints.filter_poses_by_score(args.num_mpnn_inputs, f"{cycle_prefix}_fastdesign_comp_score", prefix=f"{cycle_prefix}_fastdesign_filter", remove_layers=2, plot=fd_st)
 
         # redesign Sequence with ProteinMPNN
         mpnn_designs = inpaints.mpnn_design(mpnn_options=f"--num_seq_per_target={args.num_mpnn_seqs} --sampling_temp={args.mpnn_sampling_temp}", prefix=f"{cycle_prefix}_mpnn", fixed_positions_col="fixed_residues")
@@ -141,8 +144,10 @@ if __name__ == "__main__":
     argparser.add_argument("--plot_scoreterms", type=str, default="esm_plddt,esm_bb_ca_rmsd,esm_bb_ca_motif_rmsd,fastdesign_total_score", help="Scoreterms for which refinement trajectories should be plotted.")
 
     # cyclic refinement
+    argparser.add_argument("--fastdesign_script", type=str, default="refine.xml", help="Path to the Rosetta Design script that you would like to run.")
     argparser.add_argument("--num_fastdesign_outputs", type=int, default=5, help="Number of poses that should be kept after FastDesign.")
     argparser.add_argument("--num_fastdesign_inputs", type=int, default=5, help="Number of inputs into fastdesign for each cycle.")
+    argparser.add_argument("--num_mpnn_inputs", type=int, default=10, help="Number of inputs into MPNN during each cycle.")
     argparser.add_argument("--num_mpnn_seqs", type=int, default=50, help="Number of sequences to generate using ProteinMPNN.")
     argparser.add_argument("--mpnn_sampling_temp", type=float, default=0.1, help="Sampling Temperature for ProteinMPNN")
     argparser.add_argument("--num_esm_inputs", type=int, default=25, help="Number of Sequences per backbone that should be predicted by ProteinMPNN.")
