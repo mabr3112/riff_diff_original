@@ -11,6 +11,7 @@ from itertools import chain
 from copy import deepcopy
 from glob import glob
 import re
+from webbrowser import get
 
 # import dependencies
 from matplotlib import pyplot as plt
@@ -503,6 +504,25 @@ def compile_inpaint_pose_opts(input_series: pd.Series, fragment_dict: dict, max_
     # combine into pose_options string:
     return f"--contigs {contig_str} --inpaint_seq {inpaint_seq_str} --tie_translate {translate_str} --block_rotate {rotate_str}"
 
+def get_force_aa(fragments: list, fragment_dict: dict) -> str:
+    ''''''
+    aa_3to1_dict = {'ALA': 'A', 'CYS': 'C', 'ASP': 'D', 'GLU': 'E', 'PHE': 'F', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I', 'LYS': 'K', 'LEU': 'L', 'MET': 'M', 'ASN': 'N', 'PRO': 'P', 'GLN': 'Q', 'ARG': 'R', 'SER': 'S', 'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y'}
+    return ",".join([f"{chr(ord('A')+i)}{fragment_dict[fragment]['res_num']}{aa_3to1_dict[fragment_dict[fragment]['identity']]}" for i, fragment in enumerate(fragments)])
+
+def compile_hallucination_pose_opts(input_series: pd.Series, fragment_dict: dict, max_length=74, flanking="split"):
+    '''Compile and write pose options for hallucination'''
+    # calc fragment contigs, linkers and flankers for contig:
+    fragments = get_fragments(input_series)
+    fragment_contigs = get_fragments_contigs(fragments, fragment_dict)
+    linkers = get_linkers(input_series)
+    nterm, cterm = get_flankers(fragment_contigs, linkers, max_length, flanking=flanking)
+
+    # compile force_aa_str:
+    contig_str = compile_contig_string(fragment_contigs, linkers, nterm, cterm)
+    force_aa_str = get_force_aa(fragments, fragment_dict)
+
+    return f"--mask {contig_str} --force_aa {force_aa_str}"
+
 def write_inpaint_contigs_to_json(input_df: pd.DataFrame, json_path: str, fragment_dict: dict, max_length: int) -> dict:
     '''AAA'''
     out_dict = {index: compile_inpaint_pose_opts(input_df.loc[index], fragment_dict=fragment_dict, max_length=max_length, flanking="split") for index in input_df.index}
@@ -839,7 +859,8 @@ def main(args):
     fixedres_df = pd.DataFrame.from_dict({"fixed_residues": {index: get_fixed_res(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
     motif_res_df = pd.DataFrame.from_dict({"motif_residues": {index: get_motif_res(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
     motif_identities_df = pd.DataFrame.from_dict({"catres_identities": {index: get_res_identity(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
-    selected_path_df = selected_path_df.join([fixedres_df, motif_res_df, motif_identities_df, pd.DataFrame.from_dict({"inpainting_pose_opts": contigs_dict})])
+    hallucination_pose_opts_df = pd.DataFrame.from_dict({"hallucination_pose_opts": {index: compile_hallucination_pose_opts(selected_path_df.loc[index], unique_fragments_dict, max_length=args.pdb_length) for index in selected_fragments}})
+    selected_path_df = selected_path_df.join([fixedres_df, motif_res_df, motif_identities_df, hallucination_pose_opts_df, pd.DataFrame.from_dict({"inpainting_pose_opts": contigs_dict})])
 
     # store selected paths DataFrame
     scores_path = f"{args.output_dir}/selected_paths.json"
