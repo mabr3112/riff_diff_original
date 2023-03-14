@@ -13,3 +13,4 @@ jpt_test.ipynb
 rosetta/ROSETTA_CRASH.log
 .gitignore
 utils/dev_testing.ipynb
+database/
