@@ -92,7 +92,7 @@ def main(args):
     # Parse Poses
     pdb_dir = f"{args.input_dir}/pdb_in/"
     ensembles = Poses(args.output_dir, glob(f"{pdb_dir}/*.pdb"))
-    ensembles.max_inpaint_gpus = args.max_inpaint_gpus
+    ensembles.max_inpaint_gpus = args.max_hallucination_gpus
 
     # Read scores of selected paths from ensemble_evaluator and store them in poses_df:
     path_df = pd.read_json(f"{args.input_dir}/selected_paths.json").reset_index().rename(columns={"index": "rdescription"})
@@ -196,7 +196,6 @@ if __name__ == "__main__":
 
     # hallucination options
     argparser.add_argument("--num_hallucinations", type=int, default=5, help="Number of hallucination trajectories.")
-    argparser.add_argument("--hallucination_steps", type=str, default='g400,m1000', help="Optimization steps for hallucination.")
     argparser.add_argument("--w_cce", type=float, default=1.25, help="Weight of Cross-Entropy loss for constrained hallucination (Strength of motif loss).")
     argparser.add_argument("--rog_thresh", type=float, default=18, help="Threshold for rog loss (Above this value, the loss starts to count)")
     argparser.add_argument("--hallucination_rmsd_weight", type=float, default=1, help="Weight of hallucination RMSD score for filtering sampled hallucination")

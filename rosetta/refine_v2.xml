@@ -7,6 +7,7 @@
 			<Reweight scoretype="coordinate_constraint" weight="1" />
 		</ScoreFunction>
 		<ScoreFunction name="r15_blank" weights="ref2015" />
+		<ScoreFunction name="beta" weights="beta" />
 	</SCOREFXNS>
 	<RESIDUE_SELECTORS>
 		<Index name="motif" resnums="%%motif_res%%" />
@@ -75,20 +76,20 @@
 	<APPLY_TO_POSE>
 	</APPLY_TO_POSE>
 	<PROTOCOLS>
-		<Add mover_name="pmm" />
+		Add mover_name="pmm" />
 		<Add mover_name="set_virtual_root" />
-		<Add mover_name="pmm" />
+		Add mover_name="pmm" />
 		<Add mover_name="add_ca_motif_cst" />
 		<Add mover_name="add_cat_res_cst" />
 		<Add mover_name="add_bb_ca_cst" />
-		<Add mover_name="pmm" />
+		Add mover_name="pmm" />
 		<Add mover_name="fastdesign_cst" />
-		<Add mover_name="pmm" />
+		Add mover_name="pmm" />
 		<Add mover_name="rm_bb_ca_cst" />
 		<Add mover_name="add_bb_ca_cst" />
 		<Add mover_name="fastdesign_cst" />
 		Add mover_name="mc_packmin" />
 		Add mover_name="sequence_metric" />
 	</PROTOCOLS>
-	<OUTPUT scorefxn="beta_cst" />
-  /</ROSETTASCRIPTS>
+	<OUTPUT scorefxn="beta" />
+</ROSETTASCRIPTS>
