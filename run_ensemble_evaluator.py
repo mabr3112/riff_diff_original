@@ -1,5 +1,6 @@
 #!/home/mabr3112/anaconda3/bin/python3.9
 # import builtins
+from ctypes import util
 import logging
 import os
 import sys
@@ -12,6 +13,7 @@ from copy import deepcopy
 from glob import glob
 import re
 from webbrowser import get
+from itertools import product
 
 # import dependencies
 from matplotlib import pyplot as plt
@@ -27,6 +29,7 @@ sys.path.append("/home/mabr3112/riff_diff/")
 import utils.helix_randomization_tools as helix_randomization_tools
 from models.riff_diff_models import *
 import utils.plotting as plots
+import utils.biopython_tools
 
 
 ########### Collecting Unique Elements from DF #######################
@@ -124,8 +127,6 @@ def generate_columnwise_pairs(col_a: list, col_b: list) -> list:
     ''''''
     pairings_list = [[(a, b) for b in col_b] for a in col_a]
     return  pairings_list
-
-from itertools import product
 
 def combine_lists(col_a, col_b):
     return list(product(col_a, col_b))
@@ -862,6 +863,13 @@ def main(args):
     hallucination_pose_opts_df = pd.DataFrame.from_dict({"hallucination_pose_opts": {index: compile_hallucination_pose_opts(selected_path_df.loc[index], unique_fragments_dict, max_length=args.pdb_length) for index in selected_fragments}})
     selected_path_df = selected_path_df.join([fixedres_df, motif_res_df, motif_identities_df, hallucination_pose_opts_df, pd.DataFrame.from_dict({"inpainting_pose_opts": contigs_dict})])
 
+    # store Ligand in separate folder for hallucionation.
+    os.makedirs((lig_folder := f"{args.output_dir}/ligand/"), exist_ok=True)
+    x_pdb_path = glob(f"{args.input_dir}/*.pdb")[0]
+    x_pdb = load_structure_from_pdbfile(x_pdb_path)
+    ligand = x_pdb[args.ligand_chain]
+    ligand_pdbfile = utils.biopython_tools.store_pose(ligand, (lig_path:=f"{lig_folder}/LG1.pdb"))
+
     # store selected paths DataFrame
     scores_path = f"{args.output_dir}/selected_paths.json"
     logging.info(f"Storing selected path scores at {scores_path}")
@@ -880,6 +888,7 @@ if __name__ == "__main__":
     # PDB Options
     argparser.add_argument("--max_num", type=int, default=50, help="Number of pdb-files that will be created by pathsearch.")
     argparser.add_argument("--pdb_length", type=int, default=69, help="Maximum length of the pdb-files that will be inpainted.")
+    argparser.add_argument("--ligand_chain", type=str, default="Z", help="PDB letter for Ligand chain. The entire ligand chain will be used as a 'receptor' chain during hallucination.")
 
     # Filter Options
     argparser.add_argument("--max_linker_length", type=int, default=10, help="Maximum length of linkers that the fragments should be connected with.")

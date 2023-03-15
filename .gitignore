@@ -15,3 +15,6 @@ rosetta/ROSETTA_CRASH.log
 utils/dev_testing.ipynb
 database/
 test/
+rosetta/refine_old.xml
+rosetta/refine_oold.xml
+ROSETTA_CRASH.log
