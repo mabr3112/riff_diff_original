@@ -115,7 +115,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # Inpaint, relax and calc pLDDT
-    hallucinations = ensembles.hallucinate(options=f"--num {args.num_hallucinations} --use_template=True --w_cce {str(args.w_cce)} --w_rog 1 --rog_thres {args.rog_thresh} --steps {args.hallucination_steps}", pose_options=list(ensembles.poses_df["hallucination_pose_opts"]), prefix="hallucination")
+    hallucinations = ensembles.hallucinate(options=f"--num {args.num_hallucinations} --use_template=True --w_cce {str(args.w_cce)} --w_rog 1 --rog_thresh {args.rog_thresh} --steps {args.hallucination_steps}", pose_options=list(ensembles.poses_df["hallucination_pose_opts"]), prefix="hallucination")
 
     # Update motif_res and fixedres to residue mapping after hallucination 
     _ = [ensembles.update_motif_res_mapping(motif_col=col, inpaint_prefix="hallucination") for col in motif_cols]

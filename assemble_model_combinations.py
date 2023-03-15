@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/tripp/anaconda3/envs/riffdiff/bin/python3.11
 
 import os
 import sys
@@ -147,10 +147,10 @@ def main(args):
             num_models = len([model for model in struct.get_models()])
             to_detach = []
             for model in struct:
-                check = distance_detection_LRU(model['A'], model['Z'], bb_only=True, ligand=True, clash_detection_vdw_multiplier=args.backbone_ligand_clash_detection_vdw_multiplier, database=database)
+                check = distance_detection_LRU(model['A'], model[args.ligand_chain], bb_only=True, ligand=True, clash_detection_vdw_multiplier=args.backbone_ligand_clash_detection_vdw_multiplier, database=database)
                 if args.rotamer_ligand_clash_detection_vdw_multiplier and check == False:
                     resnum = identify_rotamer_by_bfactor_probability(model['A'])
-                    check = distance_detection_LRU(model['A'][resnum], model['Z'], bb_only=False, ligand=True, clash_detection_vdw_multiplier=args.rotamer_ligand_clash_detection_vdw_multiplier, database=database)
+                    check = distance_detection_LRU(model['A'][resnum], model[args.ligand_chain], bb_only=False, ligand=True, clash_detection_vdw_multiplier=args.rotamer_ligand_clash_detection_vdw_multiplier, database=database)
                 if check == True:
                     to_detach.append(model.id)
 
@@ -228,6 +228,7 @@ if __name__ == "__main__":
     argparser.add_argument("--fragment_backbone_clash_detection_vdw_multiplier", type=float, default=1.5, help="Multiplier for VanderWaals radii for clash detection inbetween backbone fragments. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--backbone_ligand_clash_detection_vdw_multiplier", type=float, default=1.0, help="Multiplier for VanderWaals radii for clash detection between fragment backbones and ligand. Set None if no ligand is present. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--rotamer_ligand_clash_detection_vdw_multiplier", type=float, default=0.8, help="Multiplier for VanderWaals radii for clash detection between rotamer sidechain and ligand. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
+    argparser.add_argument("--ligand_chain", type=str, default="Z", help="Name of ligand chain.")
 
     args = argparser.parse_args()
 

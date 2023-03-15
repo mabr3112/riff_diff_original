@@ -471,9 +471,9 @@ def main(args):
 
     if args.copy_ligand == True:
         #check if ligand exists
-        if not "Z" in [chain.id for chain in theozyme.get_chains()]:
-            raise RuntimeError('No ligand found in chain Z. Please make sure the theozyme pdb is correctly formatted')
-        ligand = theozyme[0]["Z"]
+        if not args.ligand_chain in [chain.id for chain in theozyme.get_chains()]:
+            raise RuntimeError(f'No ligand found in chain {args.ligand_chain}. Please make sure the theozyme pdb is correctly formatted. Available chains: {",".join([chain.id for chain in theozyme.get_chains()])}')
+        ligand = theozyme[0][args.ligand_chain]
     else:
         ligand = None
 
@@ -516,7 +516,7 @@ if __name__ == "__main__":
 
     # mandatory input
     argparser.add_argument("--fragment_pdb", type=str, required=True, help="Path to backbone fragment pdb")
-    argparser.add_argument("--database_dir", type=str, required=True, help="Path to folder containing rotamer libraries, fragment library, etc.")
+    argparser.add_argument("--database_dir", type=str, default="/home/mabr3112/riff_diff/database/", help="Path to folder containing rotamer libraries, fragment library, etc.")
     argparser.add_argument("--theozyme_pdb", type=str, required=True, help="Path to pdbfile containing theozyme, must contain all residues in chain A numbered from 1 to n, ligand must be in chain Z (if there is one).")
     argparser.add_argument("--theozyme_resnum", type=int, required=True, help="Residue number in theozyme pdb to find fragments for.")
     argparser.add_argument("--output_dir", type=str, required=True, help="Output directory")
@@ -529,6 +529,7 @@ if __name__ == "__main__":
     argparser.add_argument("--level", type=int, default=2, help="Defines how many chis should be sampled within max_stdev of chi angle bin. if level = 0, only mean value will be returned. if level = 1, mean, mean + stdev*max_stdev, mean - stdev*max_stdev will be returned. if level = 2, mean, mean + 1/2 stdev*max_stdev, mean + stdev*max_stdev, mean - 1/2 stdev*max_stdev, mean - stdev*max_stdev will be returned.")
     argparser.add_argument("--max_rotamers", type=int, default=12, help="Maximum number of rotamers per frag_pos and residue identity that should be returned (does not necessarily equal number of output models!")
     argparser.add_argument("--his_central_atom", type=str, default="NE2", help="Only important if rotamer is HIS and flip_histidines is True, sets the name of the atom that should not be flipped. Has to be either NE2 or ND1")
+    argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of your ligand chain.")
 
     # stuff you probably don't want to touch
     argparser.add_argument("--copy_ligand", type=bool, default=True, help="Copy ligand to output pdb (only works if ligand is present in theozyme chain Z!")

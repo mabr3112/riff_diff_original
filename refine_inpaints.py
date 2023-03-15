@@ -34,6 +34,7 @@ def main(args):
     # parse poses:
     if not (input_pdbs := glob(f"{args.input_dir}/pdb_in/*.pdb")): raise FileNotFoundError(f"No *.pdb files found at {args.input_dir}")
     inpaints = Poses(args.output_dir, input_pdbs)
+    inpaints.max_rosetta_cpus = 512
     if not os.path.isdir((plotdir := f"{inpaints.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
 
     # merge fastrelax options into poses_df
