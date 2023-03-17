@@ -116,7 +116,7 @@ def main(args):
 
     # Inpaint, relax and calc pLDDT
     hallucination_options = f"--num {args.num_hallucinations} --use_template=True --w_cce {str(args.w_cce)} --w_rog 1 --rog_thresh {args.rog_thresh} --steps {args.hallucination_steps}"
-    if args.add_ligand: hallucination_options += f" --w_rep={args.w_rep} --rep_sigma={args.rep_sigma} --rep_pdb {args.input_dir}/ligand/LG1.pdb"
+    if args.add_ligand: hallucination_options += f" --w_rep={args.w_rep} --rep_sigma={args.rep_sigma} --rep_pdb {args.input_dir}/ligand/LG1.pdb --rec_placement second"
     hallucinations = ensembles.hallucinate(options=hallucination_options, pose_options=list(ensembles.poses_df["hallucination_pose_opts"]), prefix="hallucination")
 
     # Update motif_res and fixedres to residue mapping after hallucination 
@@ -125,7 +125,7 @@ def main(args):
 
     # Filter down (first, to one hallucination per backbone, then by half) based on pLDDT and RMSD
     hal_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="hallucination_template_bb_ca", remove_layers=1)
-    hal_comp_score = ensembles.calc_composite_score("hallucination_comp_score", ["hallucination_loss_cce", "hallucination_loss_kl", "hallucination_template_bb_ca_motif_rmsd"], [1, 1, args.hallucination_rmsd_weight])
+    hal_comp_score = ensembles.calc_composite_score("hallucination_comp_score", ["hallucination_loss_cce", "hallucination_loss_kl", "hallucination_template_bb_ca_motif_rmsd"], [1, 1.5, args.hallucination_rmsd_weight])
     hal_sampling_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "hallucination_comp_score", prefix="hallucination_sampling_filter", remove_layers=1, plot=["hallucination_comp_score", "hallucination_loss_kl", "hallucination_loss_cce", "hallucination_template_bb_ca_motif_rmsd", "hallucination_trf_motif_bb_ca_rmsd"])
     
     # mutate any residues in the pose back to what they are supposed to be (hallucination sometimes does not keep the sequence)
