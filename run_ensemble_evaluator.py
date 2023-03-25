@@ -241,13 +241,14 @@ def add_values_to_array(input_array: np.array, values: np.array) -> np.array:
     return added
 
 #################### Torch ##########################################################################
-def prediction_dataloader(ds, device, batch_size=1024):
+def prediction_dataloader(ds, device, shuffle=False, batch_size=1024):
     '''Dataloader for running predictions'''
     # dataloader for cpu
     dl_cpu = DataLoader(ds, batch_size=batch_size, shuffle=False)
     
     # dl on device
     dl = DeviceDataLoader(dl_cpu, device)
+    print(f"Created Dataloader for device {device}")
     return dl
 
 #################### Prediction Postprocessing ######################################################
@@ -652,7 +653,7 @@ def main(args):
     device = cpu
 
     # load model
-    model_path = f"{script_dir}/models/model_term_v1.pth"
+    model_path = f"{script_dir}/models/model_plddt_march.pth"
     model = Model_FNN_BN(layers=[9, 512, 512, 512, 512, 64, 1], device=device, act_function=F.gelu, dropout=0.17)
     model.load_state_dict(torch.load(model_path, map_location=cpu))
     model.eval()
@@ -699,7 +700,7 @@ def main(args):
     device = cpu
 
     # load model
-    rmsd_model_path = f"{script_dir}/models/model_term_rmsd_v1.pth"
+    rmsd_model_path = f"{script_dir}/models/model_rmsd_march.pth"
     rmsd_model = Model_FNN_BN(layers=[9, 512, 512, 512, 128, 64, 1], device=device, act_function=F.gelu, dropout=0.17)
     rmsd_model.load_state_dict(torch.load(rmsd_model_path, map_location=cpu))
     rmsd_model.eval()
