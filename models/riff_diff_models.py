@@ -177,7 +177,7 @@ class Model_FNN_BN(nn.Module):
             layer = nn.Linear(in_size, out_size, dtype=torch.float64)
             bn_layer = nn.BatchNorm1d(out_size, device=self.device, dtype=torch.float64)
             setattr(self, f"linear_{str(i).zfill(4)}", layer)
-            setattr(self, f"bn_{str(i).zfill(4)}", layer)
+            setattr(self, f"bn_{str(i).zfill(4)}", bn_layer)
             nn_layers.append(layer)
             bn_layers.append(bn_layer)
         
