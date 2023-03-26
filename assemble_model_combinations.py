@@ -15,6 +15,7 @@ import pandas as pd
 import numpy as np
 
 # import custom modules
+sys.path.append("/home/tripp/riff_diff/")
 import utils.adrian_utils as utils
 
 def identify_rotamer_by_bfactor_probability(entity):
@@ -227,7 +228,7 @@ if __name__ == "__main__":
     # stuff you might want to adjust
     argparser.add_argument("--fragment_backbone_clash_detection_vdw_multiplier", type=float, default=1.5, help="Multiplier for VanderWaals radii for clash detection inbetween backbone fragments. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--backbone_ligand_clash_detection_vdw_multiplier", type=float, default=1.0, help="Multiplier for VanderWaals radii for clash detection between fragment backbones and ligand. Set None if no ligand is present. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
-    argparser.add_argument("--rotamer_ligand_clash_detection_vdw_multiplier", type=float, default=0.8, help="Multiplier for VanderWaals radii for clash detection between rotamer sidechain and ligand. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
+    argparser.add_argument("--rotamer_ligand_clash_detection_vdw_multiplier", type=float, default=None, help="Multiplier for VanderWaals radii for clash detection between rotamer sidechain and ligand. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Name of ligand chain.")
 
     args = argparser.parse_args()

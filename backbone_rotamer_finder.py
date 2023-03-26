@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/tripp/anaconda3/envs/riffdiff/bin/python3.11
 
 #import logging
 #logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

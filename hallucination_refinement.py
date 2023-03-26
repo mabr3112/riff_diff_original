@@ -11,17 +11,17 @@ import utils.plotting as plots
 import utils.biopython_tools
 import utils.pymol_tools
 
-def write_new_halluc_pose_opts(row: str, contig_col: str, sequence_col: str) -> str:
+def write_new_halluc_pose_opts(row: str, opts_col: str, sequence_col: str) -> str:
     '''
     Params:
         sequence_col, str: Column in row that contains location of .fa file
     '''
     #print(row.index)
-    contig_str = row[contig_col]
-    def get_force_aa_from_contig(contig_str: str) -> str:
-        return ",".join([x for x in contig_str.split(",") if x[0].isalpha()])
-    force_aa = get_force_aa_from_contig(contig_str)
-    return f"--mask {contig_str} --force_aa {force_aa} --spike_fas {row[sequence_col]}"
+    #contig_str = row[contig_col]
+    #def get_force_aa_from_contig(contig_str: str) -> str:
+    #    return ",".join([x for x in contig_str.split(",") if x[0].isalpha()])
+    #force_aa = get_force_aa_from_contig(contig_str)
+    return row[opts_col] + f" --spike_fas {row[sequence_col]}"
 
 def divide_flanking_residues(residual: int, flanking: str) -> tuple:
     ''''''
@@ -127,7 +127,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # Inpaint, relax and calc pLDDT
-    hallucination_options = f"--num {args.num_hallucinations} --use_template=True --w_cce {str(args.w_cce)} --w_rog 1 --rog_thresh {args.rog_thresh} --steps {args.hallucination_steps}"
+    hallucination_options = f"--num {args.num_hallucinations} --use_template=True --w_cce {str(args.w_cce)} --w_rog 1 --rog_thresh {args.rog_thresh} --steps {args.hallucination_steps} --seq_prob_type=soft"
     if args.add_ligand: hallucination_options += f" --w_rep={args.w_rep} --rep_sigma={args.rep_sigma} --rep_pdb {args.input_dir}/ligand/LG1.pdb"
     hallucinations = ensembles.hallucinate(options=hallucination_options, pose_options=list(ensembles.poses_df["hallucination_pose_opts"]), prefix="hallucination")
 
@@ -155,7 +155,7 @@ def main(args):
 
     # Filter Redesigns based on confidence and RMSDs
     esm_comp_score = ensembles.calc_composite_score("esm_comp_score", ["esm_plddt", "esm_bb_ca_motif_rmsd"], [-1, 1])
-    esm_filter = ensembles.filter_poses_by_score(1, "esm_comp_score", remove_layers=1, prefix="esm_filter", plot=["esm_comp_score", "esm_plddt", "esm_bb_ca_rmsd", "esm_bb_ca_motif_rmsd", "esm_catres_motif_heavy_rmsd"])
+    esm_filter = ensembles.filter_poses_by_score(args.num_esm_outputs_per_input_backbone, "esm_comp_score", remove_layers=1, prefix="esm_filter", plot=["esm_comp_score", "esm_plddt", "esm_bb_ca_rmsd", "esm_bb_ca_motif_rmsd", "esm_catres_motif_heavy_rmsd"])
     
     # Plot Results
     if not os.path.isdir((plotdir := f"{ensembles.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
@@ -195,9 +195,16 @@ def main(args):
     # Plot final stats of selected poses
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{results_dir}/final_esm_stats.png")
 
+    # create pdb_in and stuff:
+    # write Rosetta Pose Options to a .json file:
+    ros_pose_opts = write_rosetta_pose_opts_to_json(ensembles.poses_df, path_to_json_file=f"{results_dir}/rosetta_pose_opts.json")
+    dumped = ensembles.dump_poses(f"{results_dir}/pdb_in/")
+    out_df = ensembles.poses_df[["poses_description", "fixed_residues", "motif_residues"]].set_index("poses_description")
+    out_df.to_json(f"{results_dir}/motif_res.json")
+
     ## run second hallucination round:
     ensembles.poses_df["poses"] = ensembles.poses_df["input_poses"] # restore input poses
-    ensembles.poses_df["hallucination_pose_opts_round2"] = ensembles.poses_df.apply(write_new_halluc_pose_opts, args=("hallucination_sampled_mask", "mpnn_location"), axis=1) # compile new pose_opts
+    ensembles.poses_df["hallucination_pose_opts_round2"] = ensembles.poses_df.apply(write_new_halluc_pose_opts, args=("hallucination_pose_opts", "mpnn_location"), axis=1) # compile new pose_opts
     hal_opts_round2 = f"--num {args.num_hallucinations} --use_template=True --w_cce {str(args.w_cce)} --w_rog 1 --rog_thresh {args.rog_thresh} --steps {args.hallucination_steps_round2} --spike 0.99"
     hal_round2 = ensembles.hallucinate(options=hal_opts_round2, pose_options=ensembles.poses_df["hallucination_pose_opts_round2"].to_list(), prefix="hallucination_v2")
     rmsd_hal_round_2 = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=ensembles.poses_df["template_motif"].to_list(), target_motif=ensembles.poses_df["motif_residues"].to_list(), metric_prefix="hallucination_v2_template_bb_ca", remove_layers=3)
@@ -218,7 +225,7 @@ def main(args):
 
     # Filter Redesigns based on confidence and RMSDs:
     esm_v2_comp_score = ensembles.calc_composite_score("esm_v2_comp_score", ["esm_v2_plddt", "esm_v2_bb_ca_motif_rmsd"], [-1, 1])
-    esm_v2_filter = ensembles.filter_poses_by_score(1, "esm_v2_comp_score", remove_layers=1, prefix="esm_v2_filter", plot=["esm_v2_comp_score", "esm_v2_plddt", "esm_v2_bb_ca_rmsd", "esm_v2_bb_ca_motif_rmsd", "esm_v2_catres_motif_heavy_rmsd"])
+    esm_v2_filter = ensembles.filter_poses_by_score(args.num_esm_output_per_input_backbone, "esm_v2_comp_score", remove_layers=1, prefix="esm_v2_filter", plot=["esm_v2_comp_score", "esm_v2_plddt", "esm_v2_bb_ca_rmsd", "esm_v2_bb_ca_motif_rmsd", "esm_v2_catres_motif_heavy_rmsd"])
 
     # Hallucination round 2 stats:
     cols = ["hallucination_v2_loss_kl", "hallucination_v2_loss_cce", "hallucination_v2_trf_motif_bb_ca_rmsd", "hallucination_v2_template_bb_ca_motif_rmsd", "mpnn_v2_score"]
@@ -297,7 +304,7 @@ if __name__ == "__main__":
     argparser.add_argument("--output_scoreterm_weights", type=str, default="-1,1", help="Weights for how to combine the scoreterms listed in '--output_scoreterms'")
     argparser.add_argument("--final_output_scoreterms", type=str, default="esm_v2_plddt,esm_v2_bb_ca_motif_rmsd", help="Scoreterms to use to filter ESMFolded PDBs to the final output pdbs. IMPORTANT: if you supply scoreterms, also supply weights and always check the filter output plots in the plots/ directory!")
     argparser.add_argument("--final_output_scoreterm_weights", type=str, default="-1,1", help="Weights for how to combine the scoreterms listed in '--output_scoreterms'")
-    
+    argparser.add_argument("--num_esm_outputs_per_input_backbone", type=int, default=5, help="How many of the 'args.num_esm_inputs' structures should be kept?")
 
     args = argparser.parse_args()
 
