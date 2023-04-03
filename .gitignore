@@ -18,3 +18,10 @@ test/
 rosetta/refine_old.xml
 rosetta/refine_oold.xml
 ROSETTA_CRASH.log
+models/model_term_small.pth
+models/model_term_v3.pth
+refinement_figures.ipynb
+Pearson_R.png
+model_evaluation.ipynb
+.gitignore
+model_evaluation_figures.ipynb
