@@ -556,7 +556,7 @@ def compile_rfdiffusion_pose_opts(input_series: pd.Series, fragment_dict: dict, 
     # find ligand name:
     lig_name = find_ligand_name(fragments[-1], fragment_dict=fragment_dict, ligand_chain=ligand_chain)
 
-    return f"'contigmap.contigs=[{contig_str}]' 'contigmap.inpaint_seq=[{inpaint_seq}] potentials.substrate={lig_name}"
+    return f"'contigmap.contigs=[{contig_str}]' 'contigmap.inpaint_seq=[{inpaint_seq}]' potentials.substrate={lig_name}"
 
 def write_inpaint_contigs_to_json(input_df: pd.DataFrame, json_path: str, fragment_dict: dict, max_length: int) -> dict:
     '''AAA'''

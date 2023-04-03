@@ -125,7 +125,7 @@ def main(args):
     # Filter down (first, to one hallucination per backbone, then by half) based on pLDDT and RMSD
     hal_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="rfdiffusion_template_bb_ca", remove_layers=1)
     hal_comp_score = ensembles.calc_composite_score("rfdiffusion_comp_score", ["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"], [-1, args.rfdiffusion_rmsd_weight])
-    hal_sampling_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "rfdiffusion_comp_score", prefix="rfdiffusion_sampling_filter", remove_layers=1, plot=["rfdiffusion_comp_score", "rfdiffusion_template_bb_ca_motif_rmsd"])
+    hal_sampling_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "rfdiffusion_comp_score", prefix="rfdiffusion_sampling_filter", remove_layers=1, plot=["rfdiffusion_comp_score", "rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"])
     
     # mutate any residues in the pose back to what they are supposed to be (hallucination sometimes does not keep the sequence)
     #_ = ensembles.biopython_mutate("catres_identities")
