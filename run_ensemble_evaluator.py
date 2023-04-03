@@ -536,7 +536,13 @@ def compile_hallucination_pose_opts(input_series: pd.Series, fragment_dict: dict
 
     return f"--mask {contig_str} --force_aa {force_aa_str}"
 
-def compile_rfdiffusion_pose_opts(input_series: pd.Series, fragment_dict: dict, max_length=74, flanking="split"):
+def find_ligand_name(fragment, fragment_dict: dict, ligand_chain="Z") -> str:
+    '''returns name of Ligand in fragment'''
+    fragment_d = fragment_dict[fragment]
+    frag_pose = load_structure_from_pdbfile(f"{args.input_dir}/{fragment_d['origin']}", all_models=True)[fragment_d["frag_num"]][ligand_chain]
+    return [x for x in frag_pose.get_residues()][0].get_resname()
+
+def compile_rfdiffusion_pose_opts(input_series: pd.Series, fragment_dict: dict, max_length=74, flanking="split", ligand_chain="Z"):
     '''Compile and write pose opts for RFdiffusion'''
     fragments = get_fragments(input_series)
     fragment_contigs = get_fragments_contigs(fragments, fragment_dict)
@@ -547,7 +553,10 @@ def compile_rfdiffusion_pose_opts(input_series: pd.Series, fragment_dict: dict, 
     contig_str = compile_contig_string(fragment_contigs, linkers, nterm, cterm).replace(",", "/")
     inpaint_seq = compile_inpaint_seq(fragments, fragment_dict).replace(",", "/")
 
-    return f"'contigmap.contigs=[{contig_str}]' 'contigmap.inpaint_seq=[{inpaint_seq}]"
+    # find ligand name:
+    lig_name = find_ligand_name(fragments[-1], fragment_dict=fragment_dict, ligand_chain=ligand_chain)
+
+    return f"'contigmap.contigs=[{contig_str}]' 'contigmap.inpaint_seq=[{inpaint_seq}] potentials.substrate={lig_name}"
 
 def write_inpaint_contigs_to_json(input_df: pd.DataFrame, json_path: str, fragment_dict: dict, max_length: int) -> dict:
     '''AAA'''
@@ -886,7 +895,7 @@ def main(args):
     motif_res_df = pd.DataFrame.from_dict({"motif_residues": {index: get_motif_res(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
     motif_identities_df = pd.DataFrame.from_dict({"catres_identities": {index: get_res_identity(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
     hallucination_pose_opts_df = pd.DataFrame.from_dict({"hallucination_pose_opts": {index: compile_hallucination_pose_opts(selected_path_df.loc[index], unique_fragments_dict, max_length=args.pdb_length) for index in selected_fragments}})
-    rfdiff_pose_opts_df = pd.DataFrame.from_dict({"rfdiffusion_pose_opts": {index: compile_rfdiffusion_pose_opts(selected_path_df.loc[index], unique_fragments_dict, max_length=args.pdb_length) for index in selected_fragments}})
+    rfdiff_pose_opts_df = pd.DataFrame.from_dict({"rfdiffusion_pose_opts": {index: compile_rfdiffusion_pose_opts(selected_path_df.loc[index], unique_fragments_dict, max_length=args.pdb_length, ligand_chain=args.ligand_chain) for index in selected_fragments}})
     selected_path_df = selected_path_df.join([fixedres_df, motif_res_df, motif_identities_df, hallucination_pose_opts_df, rfdiff_pose_opts_df, pd.DataFrame.from_dict({"inpainting_pose_opts": contigs_dict})])
 
     # store Ligand in separate folder for hallucionation.
