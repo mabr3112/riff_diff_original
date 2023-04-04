@@ -121,7 +121,8 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"potentials.guide_scale=1 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=['type:monomer_ROG'] potentials.guide_decay='linear'"
+    diffusion_options = f"potentials.guide_scale=1 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=['type:monomer_ROG,weight:1.5,min_dist:14'] potentials.guide_decay='linear'"
+    diffusion_options += " " + args.rfdiffusion_additional_options
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion")
 
     # Update motif_res and fixedres to residue mapping after hallucination 
@@ -203,13 +204,12 @@ if __name__ == "__main__":
 
     # rfdiffusion options
     argparser.add_argument("--num_rfdiffusions", type=int, default=5, help="Number of rfdiffusion trajectories.")
-    argparser.add_argument("--w_cce", type=float, default=1.25, help="Weight of Cross-Entropy loss for constrained hallucination (Strength of motif loss).")
-    argparser.add_argument("--rog_thresh", type=float, default=18, help="Threshold for rog loss (Above this value, the loss starts to count)")
     argparser.add_argument("--rfdiffusion_rmsd_weight", type=float, default=1, help="Weight of hallucination RMSD score for filtering sampled hallucination")
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=10, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
     argparser.add_argument("--total_flanker_length", type=int, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
     argparser.add_argument("--add_ligand", type=bool, default=True, help="Do you want to do hallucination with a ligand?")
+    argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
 
     # mpnn options
     argparser.add_argument("--num_mpnn_inputs", type=int, default=5, help="Number of hallucinations for each input fragment that should be passed to MPNN.")
