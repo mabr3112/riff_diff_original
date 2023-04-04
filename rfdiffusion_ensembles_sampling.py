@@ -32,7 +32,10 @@ def divide_flanking_residues(residual: int, flanking: str) -> tuple:
 def adjust_flanking(rfdiffusion_pose_opts: str, flanking_type: str, total_flanker_length:int=None) -> str:
     '''AAA'''
     def get_contigs_str(rfdiff_opts: str) -> str:
-        return [x for x in rfdiff_opts.split(" ") if x.startswith("'contigmap.contigs=")][0].split()[1]
+        elem = [x for x in rfdiff_opts.split(" ") if x.startswith("'contigmap.contigs=")][0]
+        contig_start = elem.find("[") +1
+        contig_end = elem.find("]")
+        return elem[contig_start:contig_end]
     
     # extract contig from contigs_str
     contig = get_contigs_str(rfdiffusion_pose_opts)
@@ -47,6 +50,7 @@ def adjust_flanking(rfdiffusion_pose_opts: str, flanking_type: str, total_flanke
     
     # reassemble contig string and replace with hallucinate pose opts.
     reassembled = f"{nterm}/{middle}/{cterm}"
+    print(reassembled)
     return rfdiffusion_pose_opts.replace(contig, reassembled)
 
 def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, motif_prefix: str, out_pdb_path=None) -> list[str]:
@@ -104,6 +108,8 @@ def main(args):
 
     # change cterm and nterm flankers according to input args.
     if args.flanking: ensembles.poses_df["rfdiffusion_pose_opts"] = [adjust_flanking(rfdiffusion_pose_opts_str, args.flanking, args.total_flanker_length) for rfdiffusion_pose_opts_str in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
+    elif args.total_flanker_length:
+        raise ValueError(f"Argument 'total_flanker_length' was given, but not 'flanking'! Both args have to be provided.")
     #print(ensembles.poses_df.iloc[0]["diffusion_pose_opts"])
 
     # Check if merger was successful:
@@ -115,7 +121,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"potentials.guide_scale=1 inference.num_designs={args.num_rfdiffusions}"
+    diffusion_options = f"potentials.guide_scale=1 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=['type:monomer_ROG'] potentials.guide_decay='linear'"
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion")
 
     # Update motif_res and fixedres to residue mapping after hallucination 
@@ -173,7 +179,7 @@ def main(args):
     ensembles.dump_poses(results_dir)
 
     # Copy and rewrite Fragments into output_dir/reference_fragments
-    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="hallucination", out_pdb_path=ref_frag_dir)
+    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=ref_frag_dir)
 
     # Write PyMol Alignment Script
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
