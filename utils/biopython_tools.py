@@ -20,11 +20,11 @@ def residue_mapping_from_motif(motif_old: list, motif_new: list) -> dict:
     '''AAA'''
     return {tuple(old): tuple(new) for old, new in zip(motif_old, motif_new)}
 
-def renumber_pose_by_residue_mapping(pose: Bio.PDB.Structure.Structure, residue_mapping: dict) -> Bio.PDB.Structure.Structure:
+def renumber_pose_by_residue_mapping(pose: Bio.PDB.Structure.Structure, residue_mapping: dict, keep_chain:str="") -> Bio.PDB.Structure.Structure:
     '''AAA'''
     # deepcopy pose and detach all residues from chains.
     out_pose = copy.deepcopy(pose)
-    ch = [chain.id for chain in out_pose.get_chains()]
+    ch = [chain.id for chain in out_pose.get_chains() if chain.id != keep_chain]
     for chain in ch:
         residues = [res.id for res in out_pose[chain].get_residues()]
         [out_pose[chain].detach_child(resi) for resi in residues]
@@ -49,11 +49,11 @@ def renumber_pose_by_residue_mapping(pose: Bio.PDB.Structure.Structure, residue_
 
     return out_pose
 
-def renumber_pdb_by_residue_mapping(pose_path: str, residue_mapping: dict, out_pdb_path=None) -> str:
+def renumber_pdb_by_residue_mapping(pose_path: str, residue_mapping: dict, out_pdb_path=None, keep_chain:str="") -> str:
     '''AAA'''
     # change numbering
     pose = load_structure_from_pdbfile(pose_path)
-    pose = renumber_pose_by_residue_mapping(pose=pose, residue_mapping=residue_mapping)
+    pose = renumber_pose_by_residue_mapping(pose=pose, residue_mapping=residue_mapping, keep_chain=keep_chain)
     
     # save pose
     path_to_output_structure = out_pdb_path or pose_path
