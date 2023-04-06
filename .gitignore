@@ -25,3 +25,4 @@ Pearson_R.png
 model_evaluation.ipynb
 .gitignore
 model_evaluation_figures.ipynb
+models/__pycache__/riff_diff_models.cpython-39.pyc
