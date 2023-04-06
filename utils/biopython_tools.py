@@ -1,3 +1,4 @@
+from json import load
 import Bio
 from Bio.PDB import PDBIO
 import Bio.PDB
@@ -59,3 +60,108 @@ def renumber_pdb_by_residue_mapping(pose_path: str, residue_mapping: dict, out_p
     path_to_output_structure = out_pdb_path or pose_path
     store_pose(pose, path_to_output_structure)
     return path_to_output_structure
+
+def replace_motif_in_pose(pose_path: str, motif_path: str, pose_motif: dict, ref_motif: dict, new_pose:str=None) -> Bio.PDB.Structure:
+    '''Replaces motif in a pose.
+    
+    #### TODO (itref refactoring): frame pose and ref motifs as lists. Dictionaries do not allow mixing of chains as a motif.
+    '''
+    # load pose and motif
+    pose = load_structure_from_pdbfile(pose_path, all_models=False)
+    ref_motif_pose = load_structure_from_pdbfile(motif_path, all_models=False)
+
+    # superimpose pose onto ref_motif based on motif residues.
+    pose_superimposed = superimpose_poses_by_motif(pose, ref_motif_pose, pose_motif, ref_motif, atoms=["CA"])
+
+    # replace
+    pose = replace_motif(pose, ref_motif_pose, pose_motif, ref_motif)
+
+    # save
+    savepath = new_pose or pose_path
+    return store_pose(pose, savepath)
+
+def get_residues_of_motif(pose: Bio.PDB.Structure, motif: dict) -> list:
+    '''returns motif or pose'''
+    return [pose[chain][(" ", res, " ")] for chain in motif for res in motif[chain]]
+
+def replace_motif(pose, replacement_pose, pose_motif, replacement_motif):
+    """Replace a motif in a pose with a motif from another pose.
+    
+    This function takes as input two `Pose` objects (`pose` and `replacement_pose`), the motif to be replaced in `pose` (`pose_motif`), and the replacement motif in `replacement_pose` (`replacement_motif`). It replaces the residues in `pose_motif` with the residues in `replacement_motif`, and returns the modified `pose`.
+    
+    :param pose: The pose containing the motif to be replaced.
+    :type pose: Pose
+    :param replacement_pose: The pose containing the replacement motif.
+    :type replacement_pose: Pose
+    :param pose_motif: The motif to be replaced in `pose`.
+    :type pose_motif: str
+    :param replacement_motif: The replacement motif in `replacement_pose`.
+    :type replacement_motif: str
+    :return: The modified `pose`.
+    :rtype: Pose
+    """    
+    repl_residues = get_residues_of_motif(replacement_pose, replacement_motif)
+    pose_residues = get_residues_of_motif(pose, pose_motif)
+
+    for pose_res, repl_res in zip(pose_residues, repl_residues):
+        old_chain = pose_res.get_parent().id
+        # remove old residue from pose
+        pose[old_chain].detach_child(pose_res.id)
+
+        # add new residues
+        print(repl_res.id[1])
+        pose[old_chain].insert(repl_res.id[1]-1, repl_res)
+
+    return pose
+
+def superimpose_poses_by_motif(mobile_pose: Bio.PDB.Structure.Structure, target_pose: Bio.PDB.Structure.Structure, mobile_motif: dict, target_motif: dict, atoms=["CA"]) -> Bio.PDB.Structure.Structure:
+    '''
+    Superimpose two structures based on residue selections. Sensitive to the order in the selection!
+    Returns RMSD after superimposition.
+    Args:
+        <ref_pdbfile>                Path to the directory containing the reference pdb
+        <target_pdbfile>             Path to the directory containing the target pdb
+        <ref_selection>              Dictionary specifying the reference motif residues: {"chain": [res, ...], ...}
+        <target_selection>           Dictionary specifying the target motif residues: {"chain": [res, ...], ...} Should be same number of residues as <ref_motif> 
+        <atoms>                      List of atoms for which to calculate RMSD with
+    '''
+    def get_atoms_of_motif(pose: Bio.PDB.Structure.Structure, motif:dict, atm_list:list=["CA"]) -> list:
+        atms = []
+        for chain in motif:
+            for res in motif[chain]:
+                [atms.append(pose[chain][(" ", res, " ")][x]) for x in atoms]
+        return atms
+    
+    # Make a list of the atoms (in the structures) you wish to align.
+    mobile_atoms = get_atoms_of_motif(mobile_pose, mobile_motif, atm_list=atoms)
+    target_atoms = get_atoms_of_motif(target_pose, target_motif, atm_list=atoms)
+
+    # Now we initiate the superimposer:
+    super_imposer = Bio.PDB.Superimposer()
+    super_imposer.set_atoms(target_atoms, mobile_atoms)
+
+    # Apply superimposer on mobile pose:
+    super_imposer.apply(mobile_pose.get_atoms())
+    return mobile_pose
+
+def replace_motif_and_add_ligand(pose_path: str, motif_path: str, pose_motif: dict, ref_motif: dict, new_pose:str=None, ligand_chain:str="Z"):
+    '''Replaces motif in a pose.
+    
+    #### TODO (itref refactoring): frame pose and ref motifs as lists. Dictionaries do not allow mixing of chains as a motif.
+    '''
+    # load pose and motif
+    pose = load_structure_from_pdbfile(pose_path, all_models=False)
+    ref_motif_pose = load_structure_from_pdbfile(motif_path, all_models=False)
+
+    # superimpose pose onto ref_motif based on motif residues.
+    pose_superimposed = superimpose_poses_by_motif(pose, ref_motif_pose, pose_motif, ref_motif, atoms=["CA"])
+
+    # replace
+    pose = replace_motif(pose, ref_motif_pose, pose_motif, ref_motif)
+
+    # add ligand chain
+    pose.add(ref_motif_pose[ligand_chain])
+
+    # save
+    savepath = new_pose or pose_path
+    return store_pose(pose, savepath)
