@@ -32,7 +32,10 @@ def divide_flanking_residues(residual: int, flanking: str) -> tuple:
 def adjust_flanking(rfdiffusion_pose_opts: str, flanking_type: str, total_flanker_length:int=None) -> str:
     '''AAA'''
     def get_contigs_str(rfdiff_opts: str) -> str:
-        return [x for x in rfdiff_opts.split(" ") if x.startswith("'contigmap.contigs=")][0].split()[1]
+        elem = [x for x in rfdiff_opts.split(" ") if x.startswith("'contigmap.contigs=")][0]
+        contig_start = elem.find("[") +1
+        contig_end = elem.find("]")
+        return elem[contig_start:contig_end]
     
     # extract contig from contigs_str
     contig = get_contigs_str(rfdiffusion_pose_opts)
@@ -47,14 +50,15 @@ def adjust_flanking(rfdiffusion_pose_opts: str, flanking_type: str, total_flanke
     
     # reassemble contig string and replace with hallucinate pose opts.
     reassembled = f"{nterm}/{middle}/{cterm}"
+    print(reassembled)
     return rfdiffusion_pose_opts.replace(contig, reassembled)
 
-def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, motif_prefix: str, out_pdb_path=None) -> list[str]:
+def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, motif_prefix: str, out_pdb_path=None, keep_ligand_chain:str="") -> list[str]:
     ''''''
     list_of_mappings = [utils.biopython_tools.residue_mapping_from_motif(ref_motif, inp_motif) for ref_motif, inp_motif in zip(input_df[f"{motif_prefix}_con_ref_pdb_idx"].to_list(), input_df[f"{motif_prefix}_con_hal_pdb_idx"].to_list())]
     output_pdb_names_list = [f"{out_pdb_path}/{desc}.pdb" for desc in input_df[desc_col].to_list()]
 
-    list_of_output_paths = [utils.biopython_tools.renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
+    list_of_output_paths = [utils.biopython_tools.renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output, keep_chain=keep_ligand_chain) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
 
     return list_of_output_paths
 
@@ -85,6 +89,12 @@ def write_rosetta_pose_opts_to_json(input_df: pd.DataFrame, path_to_json_file: s
         json.dump(pose_opts_dict, f)
     return path_to_json_file
 
+def parse_diffusion_options(default_opts: str, additional_opts: str) -> str:
+    '''AAA'''
+    def_opts = [x for x in default_opts.split(" ") + additional_opts.split(" ") if x]
+    def_opts_dict = {x.split("=")[0]: "=".join(x.split("=")[1:]) for x in def_opts}
+    return " ".join([f"{k}={v}" for k, v in def_opts_dict.items()])
+
 def main(args):
     # print Status
     print(f"\n{'#'*50}\nRunning rfdiffusion_ensembles_sampling.py on {args.input_dir}\n{'#'*50}\n")
@@ -104,6 +114,8 @@ def main(args):
 
     # change cterm and nterm flankers according to input args.
     if args.flanking: ensembles.poses_df["rfdiffusion_pose_opts"] = [adjust_flanking(rfdiffusion_pose_opts_str, args.flanking, args.total_flanker_length) for rfdiffusion_pose_opts_str in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
+    elif args.total_flanker_length:
+        raise ValueError(f"Argument 'total_flanker_length' was given, but not 'flanking'! Both args have to be provided.")
     #print(ensembles.poses_df.iloc[0]["diffusion_pose_opts"])
 
     # Check if merger was successful:
@@ -115,7 +127,8 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"potentials.guide_scale=1 inference.num_designs={args.num_rfdiffusions}"
+    diffusion_options = f"potentials.guide_scale=10 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:1.1,min_dist:15\\',\\'type:monomer_contacts,weight:1.5\\',\\'type:substrate_contacts,weight:1.5\\'] potentials.guide_decay='quadratic' diffuser.T=50"
+    diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion")
 
     # Update motif_res and fixedres to residue mapping after hallucination 
@@ -125,7 +138,7 @@ def main(args):
     # Filter down (first, to one hallucination per backbone, then by half) based on pLDDT and RMSD
     hal_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="rfdiffusion_template_bb_ca", remove_layers=1)
     hal_comp_score = ensembles.calc_composite_score("rfdiffusion_comp_score", ["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"], [-1, args.rfdiffusion_rmsd_weight])
-    hal_sampling_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "rfdiffusion_comp_score", prefix="rfdiffusion_sampling_filter", remove_layers=1, plot=["rfdiffusion_comp_score", "rfdiffusion_template_bb_ca_motif_rmsd"])
+    hal_sampling_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "rfdiffusion_comp_score", prefix="rfdiffusion_sampling_filter", remove_layers=1, plot=["rfdiffusion_comp_score", "rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"])
     
     # mutate any residues in the pose back to what they are supposed to be (hallucination sometimes does not keep the sequence)
     #_ = ensembles.biopython_mutate("catres_identities")
@@ -173,7 +186,7 @@ def main(args):
     ensembles.dump_poses(results_dir)
 
     # Copy and rewrite Fragments into output_dir/reference_fragments
-    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="hallucination", out_pdb_path=ref_frag_dir)
+    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=ref_frag_dir, keep_ligand_chain=args.ligand_chain)
 
     # Write PyMol Alignment Script
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
@@ -197,13 +210,11 @@ if __name__ == "__main__":
 
     # rfdiffusion options
     argparser.add_argument("--num_rfdiffusions", type=int, default=5, help="Number of rfdiffusion trajectories.")
-    argparser.add_argument("--w_cce", type=float, default=1.25, help="Weight of Cross-Entropy loss for constrained hallucination (Strength of motif loss).")
-    argparser.add_argument("--rog_thresh", type=float, default=18, help="Threshold for rog loss (Above this value, the loss starts to count)")
     argparser.add_argument("--rfdiffusion_rmsd_weight", type=float, default=1, help="Weight of hallucination RMSD score for filtering sampled hallucination")
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=10, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
     argparser.add_argument("--total_flanker_length", type=int, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
-    argparser.add_argument("--add_ligand", type=bool, default=True, help="Do you want to do hallucination with a ligand?")
+    argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
 
     # mpnn options
     argparser.add_argument("--num_mpnn_inputs", type=int, default=5, help="Number of hallucinations for each input fragment that should be passed to MPNN.")
@@ -215,6 +226,7 @@ if __name__ == "__main__":
     argparser.add_argument("--num_outputs", type=int, default=25, help="Number of .pdb files that will be stored into the final output directory.")
     argparser.add_argument("--output_scoreterms", type=str, default="esm_plddt,esm_bb_ca_motif_rmsd", help="Scoreterms to use to filter ESMFolded PDBs to the final output pdbs. IMPORTANT: if you supply scoreterms, also supply weights and always check the filter output plots in the plots/ directory!")
     argparser.add_argument("--output_scoreterm_weights", type=str, default="-1,1", help="Weights for how to combine the scoreterms listed in '--output_scoreterms'")
+    argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of your ligand chain.")
     
 
     args = argparser.parse_args()
