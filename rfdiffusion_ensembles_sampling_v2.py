@@ -17,9 +17,9 @@ def convert_sampled_mask(old_contig):
         return [x for x in elem.split("-") if x][-1]
     def parse_contig_elem(elem, counter):
         start, end = [int(x) for x in elem[1:].split("-")]
-        return end+counter, f"{elem[0]}{start+counter}-{end+counter}"
+        return end+counter, f"A{start+counter}-{end+counter}"
     
-    contig_elems = old_contig.split("/")
+    contig_elems = old_contig[0].split("/") if type(old_contig) == list else old_contig.split("/")
     new_contig_list = list()
     counter = 0
     
@@ -186,8 +186,16 @@ def main(args):
     ensembles.poses_df["partial_diffusion_inpaint_seq"] = [create_inpaint_seq(contig, motif) for contig, motif in zip(ensembles.poses_df["partial_diffusion_contig_str"].to_list(), ensembles.poses_df["fixed_residues"].to_list())]
     ensembles.poses_df["partial_diffusion_pose_opts"] = [f"'contigmap.contigs=[{contig}]' 'contigmap.inpaint_seq=[{inpaint_str}]'" for contig, inpaint_str in zip(ensembles.poses_df["partial_diffusion_contig_str"].to_list(), ensembles.poses_df["partial_diffusion_inpaint_seq"].to_list())]
 
+    # Copy and rewrite Fragments into output_dir/reference_fragments
+    if not os.path.isdir((partdiff_refdir := f"{ensembles.dir}/partdiff_motifs")): os.makedirs(partdiff_refdir)
+    partdiff_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=partdiff_refdir, keep_ligand_chain=args.ligand_chain)
+
+    # replace motifs so that parial diffusion diffuses on ideal motif placement:
+    for index, row in ensembles.poses_df.iterrows():
+        pose_pl = utils.biopython_tools.replace_motif_and_add_ligand(row["poses"], f'{partdiff_refdir}/{row["poses_description"]}.pdb', row["motif_residues"], row["motif_residues"], ligand_chain=args.ligand_chain)
+    
     # run partial diffusion on the motifs for refinement:
-    part_diffusion_options = f"potentials.guide_scale=10 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=\\'type:monomer_ROG,weight:1.1,min_dist:15\\',\\'type:monomer_contacts,weight:1.5\\'] potentials.guide_decay='quadratic' diffuser.partial_T=10"
+    part_diffusion_options = f"potentials.guide_scale=10 inference.num_designs=1 potentials.guiding_potentials=[\\'type:monomer_ROG,weight:0.1,min_dist:15\\',\\'type:monomer_contacts,weight:0.2\\'] potentials.guide_decay='quadratic' diffuser.partial_T=15"
     part_diffusion = ensembles.rfdiffusion(options=part_diffusion_options, pose_options=ensembles.poses_df["partial_diffusion_pose_opts"].to_list(), prefix="partial_diffusion")
 
     # calculate new rmsds:
@@ -201,9 +209,9 @@ def main(args):
 
     # Run ESMFold and calc bb_ca_rmsd, motif_ca_rmsd and motif_heavy RMSD
     esm_preds = ensembles.predict_sequences(run_ESMFold, prefix="esm")
-    esm_bb_ca_rmsds = ensembles.calc_bb_rmsd_dir(ref_pdb_dir=diffusions, metric_prefix="esm", ref_chains=["A"], pose_chains=["A"], remove_layers=1)
-    esm_motif_rmsds = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="esm_bb_ca", remove_layers=2)
-    esm_motif_heavy_rmsds = ensembles.calc_motif_heavy_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=ensembles.poses_df["template_fixedres"].to_list(), target_motif=ensembles.poses_df["fixed_residues"].to_list(), metric_prefix="esm_catres", remove_layers=2)
+    esm_bb_ca_rmsds = ensembles.calc_bb_rmsd_dir(ref_pdb_dir=part_diffusion, metric_prefix="esm", ref_chains=["A"], pose_chains=["A"], remove_layers=1)
+    esm_motif_rmsds = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="esm_bb_ca", remove_layers=3)
+    esm_motif_heavy_rmsds = ensembles.calc_motif_heavy_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=ensembles.poses_df["template_fixedres"].to_list(), target_motif=ensembles.poses_df["fixed_residues"].to_list(), metric_prefix="esm_catres", remove_layers=3)
 
     # Filter Redesigns based on confidence and RMSDs
     esm_comp_score = ensembles.calc_composite_score("esm_comp_score", ["esm_plddt", "esm_bb_ca_motif_rmsd"], [-1, 1])
@@ -215,8 +223,8 @@ def main(args):
     # RFdiffusion stats:
     cols = ["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "partial_diffusion_plddt", "partial_diffusion_template_bb_ca_motif_rmsd", "mpnn_score"]
     titles = ["RFdiffusion pLDDT", "RFdiffusion-Template\nMotif RMSD", "Partial RFdiffusion pLDDT", "Partial RFdiffusion-Template\nMotif RMSD","MPNN score"]
-    y_labels = ["pLDDT", "RMSD [\u00C5]", "-log(prob)"]
-    dims = [(0,100), (0,3), (0,100), (0,3), (0,2)]
+    y_labels = ["pLDDT", "RMSD [\u00C5]", "plDDT", "RMSD [\u00C5]", "-log(prob)"]
+    dims = [(0,1), (0,3), (0,1), (0,3), (0,2)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/rfdiffusion_stats.png")
 
     # ESM stats:

@@ -84,7 +84,7 @@ def get_residues_of_motif(pose: Bio.PDB.Structure, motif: dict) -> list:
     '''returns motif or pose'''
     return [pose[chain][(" ", res, " ")] for chain in motif for res in motif[chain]]
 
-def replace_motif(pose, replacement_pose, pose_motif, replacement_motif):
+def replace_motif(pose: Bio.PDB.Structure.Structure, replacement_pose: Bio.PDB.Structure.Structure, pose_motif: dict, replacement_motif: dict) -> Bio.PDB.Structure.Structure:
     """Replace a motif in a pose with a motif from another pose.
     
     This function takes as input two `Pose` objects (`pose` and `replacement_pose`), the motif to be replaced in `pose` (`pose_motif`), and the replacement motif in `replacement_pose` (`replacement_motif`). It replaces the residues in `pose_motif` with the residues in `replacement_motif`, and returns the modified `pose`.
@@ -108,8 +108,7 @@ def replace_motif(pose, replacement_pose, pose_motif, replacement_motif):
         # remove old residue from pose
         pose[old_chain].detach_child(pose_res.id)
 
-        # add new residues
-        print(repl_res.id[1])
+        # add new residue
         pose[old_chain].insert(repl_res.id[1]-1, repl_res)
 
     return pose
@@ -144,7 +143,7 @@ def superimpose_poses_by_motif(mobile_pose: Bio.PDB.Structure.Structure, target_
     super_imposer.apply(mobile_pose.get_atoms())
     return mobile_pose
 
-def replace_motif_and_add_ligand(pose_path: str, motif_path: str, pose_motif: dict, ref_motif: dict, new_pose:str=None, ligand_chain:str="Z"):
+def replace_motif_and_add_ligand(pose_path: str, motif_path: str, pose_motif: dict, ref_motif: dict, new_pose:str=None, ligand_chain:str="Z") -> str:
     '''Replaces motif in a pose.
     
     #### TODO (itref refactoring): frame pose and ref motifs as lists. Dictionaries do not allow mixing of chains as a motif.
@@ -159,8 +158,9 @@ def replace_motif_and_add_ligand(pose_path: str, motif_path: str, pose_motif: di
     # replace
     pose = replace_motif(pose, ref_motif_pose, pose_motif, ref_motif)
 
-    # add ligand chain
-    pose.add(ref_motif_pose[ligand_chain])
+    # add ligand chain if it is not present already:
+    if not ligand_chain in [chain.id for chain in pose]:
+        pose.add(ref_motif_pose[ligand_chain])
 
     # save
     savepath = new_pose or pose_path
