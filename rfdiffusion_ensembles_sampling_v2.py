@@ -195,13 +195,14 @@ def main(args):
         pose_pl = utils.biopython_tools.replace_motif_and_add_ligand(row["poses"], f'{partdiff_refdir}/{row["poses_description"]}.pdb', row["motif_residues"], row["motif_residues"], ligand_chain=args.ligand_chain)
     
     # run partial diffusion on the motifs for refinement:
-    part_diffusion_options = f"potentials.guide_scale=10 inference.num_designs=1 potentials.guiding_potentials=[\\'type:monomer_ROG,weight:0.1,min_dist:15\\',\\'type:monomer_contacts,weight:0.2\\'] potentials.guide_decay='quadratic' diffuser.partial_T=15"
+    part_diffusion_options = f"potentials.guide_scale=10 inference.num_designs=5 potentials.guiding_potentials=[\\'type:monomer_ROG,weight:0.1,min_dist:15\\',\\'type:monomer_contacts,weight:0.2\\'] potentials.guide_decay='quadratic' diffuser.partial_T=15"
     part_diffusion = ensembles.rfdiffusion(options=part_diffusion_options, pose_options=ensembles.poses_df["partial_diffusion_pose_opts"].to_list(), prefix="partial_diffusion")
 
     # calculate new rmsds:
     partdiff_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="partial_diffusion_template_bb_ca", remove_layers=2)
     partdiff_comp_score = ensembles.calc_composite_score("partial_diffusion_comp_score", ["partial_diffusion_plddt", "partial_diffusion_template_bb_ca_motif_rmsd"], [-1, args.rfdiffusion_rmsd_weight])
-    partdiff_sampling_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "partial_diffusion_comp_score", prefix="partial_diffusion_sampling_filter", remove_layers=1, plot=["partial_diffusion_comp_score", "partial_diffusion_plddt", "partial_diffusion_template_bb_ca_motif_rmsd"])
+    partdiff_sampling_filter1 = ensembles.filter_poses_by_score(1, "partial_diffusion_comp_score", prefix="partial_diffusion_sampling_filter", remove_layers=1, plot=["partial_diffusion_comp_score", "partial_diffusion_plddt", "partial_diffusion_template_bb_ca_motif_rmsd"])
+    partdiff_sampling_filter2 = ensembles.filter_poses_by_score(args.num_mpnn_inputs, "partial_diffusion_comp_score", prefix="partial_diffusion_sampling_filter", remove_layers=2, plot=["partial_diffusion_comp_score", "partial_diffusion_plddt", "partial_diffusion_template_bb_ca_motif_rmsd"])
 
     # Run MPNN and filter (by half)
     mpnn_designs = ensembles.mpnn_design(mpnn_options=f"--num_seq_per_target={args.num_mpnn_seqs} --sampling_temp=0.1", prefix="mpnn", fixed_positions_col="fixed_residues")

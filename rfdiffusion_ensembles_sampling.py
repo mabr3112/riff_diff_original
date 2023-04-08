@@ -127,7 +127,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"potentials.guide_scale=10 inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:1.1,min_dist:15\\',\\'type:monomer_contacts,weight:1.5\\',\\'type:substrate_contacts,weight:1.5\\'] potentials.guide_decay='quadratic' diffuser.T=50"
+    diffusion_options = f"potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:0.1,min_dist:15\\',\\'type:monomer_contacts,weight:1\\',\\'type:substrate_contacts,weight:1\\'] potentials.guide_decay='quadratic' diffuser.T=50"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion")
 
@@ -215,6 +215,7 @@ if __name__ == "__main__":
     argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
     argparser.add_argument("--total_flanker_length", type=int, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
+    argparser.add_argument("--rfdiff_guide_scale", type=float, default=4, help="Guiding scale of auxiliary potentials for RFDiffusion")
 
     # mpnn options
     argparser.add_argument("--num_mpnn_inputs", type=int, default=5, help="Number of hallucinations for each input fragment that should be passed to MPNN.")
