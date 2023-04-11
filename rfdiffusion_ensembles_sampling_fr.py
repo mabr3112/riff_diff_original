@@ -11,10 +11,13 @@ import utils.plotting as plots
 import utils.biopython_tools
 import utils.pymol_tools
 
-def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts"):
+def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None):
     '''AAA'''
     def collapse_dict_values(in_dict: dict) -> str:
-        return ",".join([str(y) for x in in_dict.values() for y in x])
+        return ",".join([str(y) for x in in_dict.values() for y in list(x)])
+    def write_pose_opts(row: pd.Series, mpnn_col:str) -> str:
+        print(row)
+        return f"-in:file:native {row['input_poses']} -parser:script_vars seq={row[mpnn_col]} motif_res={collapse_dict_values(row['motif_residues'])} cat_res={collapse_dict_values(row['fixed_residues'])}"
 
     # mpnn design on backbones
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target=1 --sampling_temp=0.05", prefix=f"{prefix}_mpnn", fixed_positions_col="fixed_residues")
@@ -22,13 +25,15 @@ def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_o
     # check for pose opts:
     if fastrelax_pose_opts not in poses.poses_df.columns:
         mpnn_col = f"{prefix}_mpnn_sequence"
-        poses.poses_df[fastrelax_pose_opts] = f"-in:file:native {poses.poses_df['input_poses']} -parser:script_vars seq={poses.poses_df[mpnn_col]} motif_res={collapse_dict_values(poses.poses_df['motif_residues'])} cat_res={collapse_dict_values(poses.poses_df['fixed_residues']}"
+        poses.poses_df[fastrelax_pose_opts] = [write_pose_opts(row, mpnn_col) for index, row in poses.poses_df.iterrows()]
 
     # fastrelax
-    fr_opts = "-beta -parser:protocol {args.fastrelax_protocol}"
+    fr_opts = f"-beta -parser:protocol {args.fastrelax_protocol}"
+    poses.poses_df["poses"] = poses.poses_df[pdb_location_col]
+    poses.poses_df["poses_description"] = poses.poses_df["poses"].str.split("/").str[-1].str.replace(".pdb","")
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=1, prefix=f"{prefix}_fr")
 
-    return poses, index_layers_to_reference+2
+    return poses, index_layers_to_reference+1, fr
 
 def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, ref_pdb_dir:str=None, bb_rmsd_dir:str=None):
     '''AAA'''
@@ -201,7 +206,7 @@ def parse_outfilter_args(scoreterm_str: str, weights_str: str, df: pd.DataFrame,
 def extract_rosetta_pose_opts(input_data: pd.Series) -> str:
     '''AAA'''
     def collapse_dict_values(in_dict: dict) -> str:
-        return ",".join([str(y) for x in in_dict.values() for y in x])
+        return ",".join([str(y) for x in in_dict.values() for y in list(x)])
     native_file = f"-in:file:native ref_fragments/{input_data['poses_description']}.pdb"
     script_vars = f"-parser:script_vars motif_res='{collapse_dict_values(input_data['motif_residues'])}' cat_res='{collapse_dict_values(input_data['fixed_residues'])}'"
     return [" ".join([native_file, script_vars])]
@@ -250,7 +255,7 @@ def main(args):
     # RFdiffusion:
     diffusion_options = f"potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:1.1,min_dist:15\\',\\'type:monomer_contacts,weight:1.5\\',\\'type:substrate_contacts,weight:1.5\\'] potentials.guide_decay='quadratic' diffuser.T=50"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
-    diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion")
+    diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
     # Update motif_res and fixedres to residue mapping after rfdiffusion 
     _ = [ensembles.update_motif_res_mapping(motif_col=col, inpaint_prefix="rfdiffusion") for col in motif_cols]
@@ -269,11 +274,13 @@ def main(args):
 
     # cycle MPNN and FastRelax:
     index_layers=1
+    pdb_loc_col = "rfdiffusion_location"
     for i in range(3):
-        ensembles, index_layers = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts")
+        ensembles, index_layers, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col)
+        pdb_loc_col = f"cycle_{str(i)}_fr_location"
 
     # run mpnn and predict with ESMFold:
-    ensembles, index_layers = mpnn_design_and_esmfold(ensembles, prefix="round1", index_layers_to_reference=index_layers, num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_dir=diffusions, ref_pdb_dir=pdb_dir)
+    ensembles, index_layers = mpnn_design_and_esmfold(ensembles, prefix="round1", index_layers_to_reference=index_layers, num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_dir=fr_pdb_dir, ref_pdb_dir=pdb_dir)
     
     # Plot Results
     if not os.path.isdir((plotdir := f"{ensembles.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
