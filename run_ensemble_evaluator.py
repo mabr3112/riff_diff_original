@@ -14,6 +14,7 @@ from glob import glob
 import re
 from webbrowser import get
 from itertools import product
+from subprocess import run
 
 # import dependencies
 from matplotlib import pyplot as plt
@@ -31,6 +32,7 @@ import utils.helix_randomization_tools as helix_randomization_tools
 from models.riff_diff_models import *
 import utils.plotting as plots
 import utils.biopython_tools
+from utils.rdkit_tools import convert_pdb_to_mol
 
 
 ########### Collecting Unique Elements from DF #######################
@@ -904,6 +906,16 @@ def main(args):
     x_pdb = load_structure_from_pdbfile(x_pdb_path)
     ligand = x_pdb[args.ligand_chain]
     ligand_pdbfile = utils.biopython_tools.store_pose(ligand, (lig_path:=f"{lig_folder}/LG1.pdb"))
+    substrate_name = [x for x in x_pdb[args.ligand_chain].get_residues()][0].get_resname()
+
+    # create Rosetta .params file if ligand contains more than 2 atoms. (Ligands with less atoms will not be considered explicitily for Rosetta Design!) (#TODO: create rotamer library too).
+    if len(list(ligand.get_atoms())) > 2:
+        # store ligand as .mol file for rosetta .molfile-to-params.py
+        logging.info(f"Running 'molfile_to_params.py' to generate params file for Rosetta.")
+        lig_molfile = convert_pdb_to_mol(lig_path)
+        run(f"python3 {script_dir}/rosetta/molfile_to_params.py -n {substrate_name} -p {lig_folder}/LG1 {lig_molfile} --clobber --chain={args.ligand_chain}", shell=True, stdout=True, check=True, stderr=True)
+    else:
+        logging.info(f"Ligand at {ligand_pdbfile} contains less than 3 atoms. No Rosetta Params file can be written for it.")
 
     # store selected paths DataFrame
     scores_path = f"{args.output_dir}/selected_paths.json"
