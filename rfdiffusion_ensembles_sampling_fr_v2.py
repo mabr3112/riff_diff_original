@@ -18,7 +18,7 @@ def fr_mpnn_esmfold(poses, prefix:str, index_layers_to_reference:int=0, fastrela
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=5, prefix=f"{prefix}_ref")
 
     # design and predict:
-    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference, num_mpnn_seqs=80, num_esm_inputs=30, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr)
+    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference+1, num_mpnn_seqs=80, num_esm_inputs=30, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr)
 
     return poses, index_layers_to_reference + 2
 
@@ -321,7 +321,7 @@ def main(args):
     # cycle fastrelax, proteinmpnn and ESMFold
     for i in range(args.refinement_cycles):
         ensembles, index_layers = fr_mpnn_esmfold(ensembles, prefix=(c_pref := f"refinement_cycle_{str(i).zfill(2)}"), index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir=pdb_dir)
-        cycle_filter = ensembles.filter_poses_by_score(5, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=2, plot=[f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"])
+        cycle_filter = ensembles.filter_poses_by_score(5, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=3, plot=[f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"])
 
     print("done")
 
