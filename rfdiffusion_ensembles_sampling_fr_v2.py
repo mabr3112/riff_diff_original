@@ -18,7 +18,7 @@ def fr_mpnn_esmfold(poses, prefix:str, index_layers_to_reference:int=0, fastrela
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=5, prefix=f"{prefix}_ref")
 
     # design and predict:
-    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference, num_mpnn_seqs=80, num_esm_inputs=30, num_esm_outputs_per_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr)
+    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference, num_mpnn_seqs=80, num_esm_inputs=30, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr)
 
     return poses, index_layers_to_reference + 2
 
@@ -27,7 +27,6 @@ def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_o
     def collapse_dict_values(in_dict: dict) -> str:
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
     def write_pose_opts(row: pd.Series, mpnn_col:str) -> str:
-        print(row)
         return f"-in:file:native {row['input_poses']} -parser:script_vars seq={row[mpnn_col]} motif_res={collapse_dict_values(row['motif_residues'])} cat_res={collapse_dict_values(row['fixed_residues'])}"
 
     # mpnn design on backbones
@@ -188,7 +187,6 @@ def adjust_flanking(rfdiffusion_pose_opts: str, flanking_type: str, total_flanke
     
     # reassemble contig string and replace with hallucinate pose opts.
     reassembled = f"{nterm}/{middle}/{cterm}"
-    print(reassembled)
     return rfdiffusion_pose_opts.replace(contig, reassembled)
 
 def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, motif_prefix: str, out_pdb_path=None, keep_ligand_chain:str="") -> list[str]:
@@ -317,7 +315,7 @@ def main(args):
     ### REFINEMENT ###
     # run initial fastrelax on predicted poses
     fr_opts = f"-beta -parser:protocol {args.refinement_protocol}"
-    fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=5, prefix=f"initial_refinement")
+    fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=ensembles.poses_df["fr_pose_opts"].to_list(), n=5, prefix=f"initial_refinement")
     index_layers += 1
 
     # cycle fastrelax, proteinmpnn and ESMFold
@@ -334,17 +332,19 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argparser.add_argument("--input_dir", type=str, required=True, help="input_directory that contains all ensemble *.pdb files to be hallucinated (max 1000 files).")
     argparser.add_argument("--output_dir", type=str, required=True, help="output_directory")
-    argparser.add_argument("--fastrelax_protocol", type=str, required="/home/mabr3112/riff_diff/rosetta/fastrelax_constrained.xml", help="Protocol of fastrelax-MPNN cycles")
+    argparser.add_argument("--fastrelax_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/fastrelax_constrained.xml", help="Protocol of fastrelax-MPNN cycles")
     argparser.add_argument("--refinement_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/fr_refine.xml")
+    argparser.add_argument("--refinement_cycles", type=int, default=5, help="Number of Fastrelax-mpnn-esmfold refinement cycles to run.")
 
     # rfdiffusion options
     argparser.add_argument("--num_rfdiffusions", type=int, default=5, help="Number of rfdiffusion trajectories.")
-    argparser.add_argument("--rfdiffusion_rmsd_weight", type=float, default=1, help="Weight of hallucination RMSD score for filtering sampled hallucination")
+    argparser.add_argument("--rfdiffusion_rmsd_weight", type=float, default=3, help="Weight of hallucination RMSD score for filtering sampled hallucination")
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=10, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
     argparser.add_argument("--total_flanker_length", type=int, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
-    argparser.add_argument("--num_rfdiffusion_outputs_per_input_backbone", type=str, default=5, help="Number of rfdiffusions that should be kept per input fragment.")
+    argparser.add_argument("--num_rfdiffusion_outputs_per_input_backbone", type=int, default=5, help="Number of rfdiffusions that should be kept per input fragment.")
+    argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
 
     # mpnn options
     argparser.add_argument("--num_mpnn_seqs", type=int, default=80, help="Number of MPNN Sequences to generate for each input backbone.")
@@ -356,8 +356,6 @@ if __name__ == "__main__":
     argparser.add_argument("--output_scoreterms", type=str, default="esm_plddt,esm_bb_ca_motif_rmsd", help="Scoreterms to use to filter ESMFolded PDBs to the final output pdbs. IMPORTANT: if you supply scoreterms, also supply weights and always check the filter output plots in the plots/ directory!")
     argparser.add_argument("--output_scoreterm_weights", type=str, default="-1,1", help="Weights for how to combine the scoreterms listed in '--output_scoreterms'")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of your ligand chain.")
-    
-
     args = argparser.parse_args()
 
     main(args)
