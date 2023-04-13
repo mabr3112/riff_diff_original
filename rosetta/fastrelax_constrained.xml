@@ -47,7 +47,7 @@
 		</AddConstraints>
 		<RemoveConstraints name="rm_bb_ca_cst" constraint_generators="set_bb_ca_constraint" />
 		<SavePoseMover name="save_start_pose" restore_pose="0" reference_name="start_pose" />
-		<FastRelax name="fastrelax" scorefxn="beta" />
+		<FastRelax name="fastrelax" scorefxn="beta_cst" />
 		<SimpleThreadingMover name="thread_sequence" pack_neighbors="false" start_position="1" thread_sequence="%%seq%%" scorefxn="beta" pack_rounds="1" />
 		<RunSimpleMetrics name="rmsd_metrics" metrics="bb_heavy_rmsd,bb_ca_rmsd" />
 	</MOVERS>
@@ -59,6 +59,7 @@
 		<Add mover_name="add_cat_res_cst" />
 		<Add mover_name="fastrelax" />
 		<Add mover_name="rm_bb_ca_cst" />
+		ADD mover_name="add_bb_ca_cst" />
 		<Add mover_name="fastrelax" />
 		Add filter_name="packstat" />
 		Add filter_name="exposed_hydrophobics" />

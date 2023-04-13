@@ -24,13 +24,13 @@ def fr_mpnn_esmfold(poses, prefix:str, n:int, index_layers_to_reference:int=0, f
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=n, prefix=f"{prefix}_refinement")
     
     # calculate RMSDs
-    rmsds = poses.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=poses.poses_df["motif_residues"].to_list(), target_motif=poses.poses_df["motif_residues"].to_list(), metric_prefix=f"{prefix}_refinement", remove_layers=index_layers_to_reference+1)
+    rmsds = poses.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=poses.poses_df["template_motif"].to_list(), target_motif=poses.poses_df["motif_residues"].to_list(), metric_prefix=f"{prefix}_refinement_bb_ca", remove_layers=index_layers_to_reference+1)
 
     # design and predict:
-    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference+1, num_mpnn_seqs=30, num_esm_inputs=10, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr)
+    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference+1, num_mpnn_seqs=30, num_esm_inputs=10, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr, rmsd_weight=3)
     return poses, index_layers_to_reference + 2
 
-def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None):
+def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, ref_pdb_dir:str=None):
     '''AAA'''
     def collapse_dict_values(in_dict: dict) -> str:
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
@@ -50,14 +50,16 @@ def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_o
     poses.poses_df["poses"] = poses.poses_df[pdb_location_col]
     poses.poses_df["poses_description"] = poses.poses_df["poses"].str.split("/").str[-1].str.replace(".pdb","")
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=1, prefix=f"{prefix}_fr")
+    if ref_pdb_dir:
+        fr_motif_ca_rmsds = poses.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=poses.poses_df["template_motif"].to_list(), target_motif=poses.poses_df["motif_residues"].to_list(), metric_prefix=f"{prefix}_fr_bb_ca", remove_layers=index_layers_to_reference+1)
 
     return poses, index_layers_to_reference+1, fr
 
-def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, ref_pdb_dir:str=None, bb_rmsd_dir:str=None):
+def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, ref_pdb_dir:str=None, bb_rmsd_dir:str=None, rmsd_weight:float=1):
     '''AAA'''
     # Run MPNN and filter (by half)
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1", prefix=f"{prefix}_mpnn", fixed_positions_col="fixed_residues")
-    mpnn_seqfilter = poses.filter_poses_by_score(args.num_esm_inputs, f"{prefix}_mpnn_score", prefix=f"{prefix}_mpnn_seqfilter", remove_layers=1)
+    mpnn_seqfilter = poses.filter_poses_by_score(num_esm_inputs, f"{prefix}_mpnn_score", prefix=f"{prefix}_mpnn_seqfilter", remove_layers=1)
 
     # Run ESMFold and calc bb_ca_rmsd, motif_ca_rmsd and motif_heavy RMSD
     esm_preds = poses.predict_sequences(run_ESMFold, prefix=f"{prefix}_esm")
@@ -66,7 +68,7 @@ def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, 
     esm_motif_heavy_rmsds = poses.calc_motif_heavy_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=poses.poses_df["template_fixedres"].to_list(), target_motif=poses.poses_df["fixed_residues"].to_list(), metric_prefix=f"{prefix}_esm_catres", remove_layers=index_layers_to_reference+1)
 
     # Filter Redesigns based on confidence and RMSDs
-    esm_comp_score = poses.calc_composite_score(f"{prefix}_esm_comp_score", [f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_motif_rmsd"], [-1, 1])
+    esm_comp_score = poses.calc_composite_score(f"{prefix}_esm_comp_score", [f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_motif_rmsd"], [-1, rmsd_weight])
     esm_filter = poses.filter_poses_by_score(num_esm_outputs_per_input_backbone, f"{prefix}_esm_comp_score", remove_layers=1, prefix=f"{prefix}_esm_filter", plot=[f"{prefix}_esm_comp_score", f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_rmsd", f"{prefix}_esm_bb_ca_motif_rmsd", f"{prefix}_esm_catres_motif_heavy_rmsd"])
     
     # Plot Results
@@ -249,10 +251,13 @@ def main(args):
     ensembles = Poses(args.output_dir, glob(f"{pdb_dir}/*.pdb"))
     ensembles.max_rfdiffusion_gpus = args.max_rfdiffusion_gpus
     plotdir = f"{ensembles.dir}/plots"
+    plot_dir = ensembles.plot_dir
 
     # Read scores of selected paths from ensemble_evaluator and store them in poses_df:
     path_df = pd.read_json(f"{args.input_dir}/selected_paths.json").reset_index().rename(columns={"index": "rdescription"})
     ensembles.poses_df = ensembles.poses_df.merge(path_df, left_on="poses_description", right_on="rdescription")
+    ensembles.max_rosetta_cpus = 500
+    ensembles.max_mpnn_gpus = 10
 
     # change cterm and nterm flankers according to input args.
     if args.flanking: ensembles.poses_df["rfdiffusion_pose_opts"] = [adjust_flanking(rfdiffusion_pose_opts_str, args.flanking, args.total_flanker_length) for rfdiffusion_pose_opts_str in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
@@ -291,8 +296,15 @@ def main(args):
     # cycle MPNN and FastRelax:
     index_layers=1
     pdb_loc_col = "rfdiffusion_location"
+    fr_mpnn_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/fr_mpnn_rmsd_trajectory.png", title="Motif BB-Ca\nTrajectory", dims=(0,8))
     for i in range(3):
-        ensembles, index_layers, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col)
+        # run mpnn and fr
+        ensembles, index_layers, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, ref_pdb_dir=pdb_dir)
+
+        # plot
+        fr_mpnn_rmsd_traj.add_and_plot(ensembles.poses_df[f"cycle_{str(i)}_fr_bb_ca_motif_rmsd"], f"cycle_{str(i)}")
+
+        # setup next cycle
         pdb_loc_col = f"cycle_{str(i)}_fr_location"
 
     # run mpnn and predict with ESMFold:
@@ -323,7 +335,6 @@ def main(args):
     ### REFINEMENT ###
     # initial number of refinement runs is higher:
     fr_n = 25
-    plot_dir = ensembles.plot_dir
 
     # instantiate plotting trajectories:
     esm_plddt_traj = PlottingTrajectory(y_label="ESMFold pLDDT", location=f"{plot_dir}/esm_plddt_trajectory.png", title="ESMFold Trajectory", dims=(0,100))
@@ -362,7 +373,6 @@ def main(args):
     # Write PyMol Alignment Script
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
     pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"{c_pref}_esm_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
-
 
 
     print("done")
