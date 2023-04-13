@@ -5,21 +5,29 @@ sys.path += ["/home/mabr3112/projects/iterative_refinement/"]
 sys.path += ["/home/markus/Desktop/script_development/iterative_refinement/"]
 
 import json
-from iterative_refinement import *
 from glob import glob
+import os
+import pandas as pd
+import shutil
+
+# import custom modules
+from iterative_refinement import *
 import utils.plotting as plots 
 import utils.biopython_tools
 import utils.pymol_tools
+from utils.plotting import PlottingTrajectory
 
-def fr_mpnn_esmfold(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir:str=None) -> Poses:
+def fr_mpnn_esmfold(poses, prefix:str, n:int, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir:str=None) -> Poses:
     '''AAA'''
     # run fastrelax on predicted poses
     fr_opts = f"-beta -parser:protocol {args.refinement_protocol}"
-    fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=5, prefix=f"{prefix}_ref")
+    fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=n, prefix=f"{prefix}_refinement")
+    
+    # calculate RMSDs
+    rmsds = poses.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=poses.poses_df["motif_residues"].to_list(), target_motif=poses.poses_df["motif_residues"].to_list(), metric_prefix=f"{prefix}_refinement", remove_layers=index_layers_to_reference+1)
 
     # design and predict:
-    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference+1, num_mpnn_seqs=80, num_esm_inputs=30, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr)
-
+    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference+1, num_mpnn_seqs=30, num_esm_inputs=10, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr)
     return poses, index_layers_to_reference + 2
 
 def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None):
@@ -294,7 +302,7 @@ def main(args):
     #scoreterms, weights = parse_outfilter_args(args.output_scoreterms, args.output_scoreterm_weights, ensembles.poses_df, prefix="round1")
     out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", (st := [f"round1_esm_plddt", f"round1_esm_bb_ca_rmsd", f"round1_esm_bb_ca_motif_rmsd"]), [-0.5,0.5,1])
     out_filter = ensembles.filter_poses_by_score(args.num_refinement_inputs, f"out_filter_comp_score", prefix="out_filter", plot=st)
-    results_dir = f"{args.output_dir}/results/"
+    results_dir = f"{args.output_dir}/intermediate_results/"
     ref_frag_dir = f"{results_dir}/ref_fragments/"
     if not os.path.isdir(ref_frag_dir): os.makedirs(ref_frag_dir, exist_ok=True)
     ensembles.dump_poses(results_dir)
@@ -313,15 +321,49 @@ def main(args):
     out_df.to_json(f"{results_dir}/motif_res.json")
 
     ### REFINEMENT ###
-    # run initial fastrelax on predicted poses
-    fr_opts = f"-beta -parser:protocol {args.refinement_protocol}"
-    fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=ensembles.poses_df["fr_pose_opts"].to_list(), n=5, prefix=f"initial_refinement")
-    index_layers += 1
+    # initial number of refinement runs is higher:
+    fr_n = 25
+    plot_dir = ensembles.plot_dir
+
+    # instantiate plotting trajectories:
+    esm_plddt_traj = PlottingTrajectory(y_label="ESMFold pLDDT", location=f"{plot_dir}/esm_plddt_trajectory.png", title="ESMFold Trajectory", dims=(0,100))
+    esm_bb_ca_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/esm_bb_ca_trajectory.png", title="ESMFold BB-Ca\nRMSD Trajectory", dims=(0,10))
+    esm_motif_ca_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/esm_motif_ca_trajectory.png", title="ESMFold Motif-Ca\nRMSD Trajectory", dims=(0,8))
+    esm_catres_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/esm_catres_rmsd_trajectory.png", title="ESMFold Motif\nSidechain RMSD Trajectory", dims=(0,8))
+    refinement_total_score_traj = PlottingTrajectory(y_label="Rosetta total score [REU]", location=f"{plot_dir}/rosetta_total_score_trajectory.png", title="FastDesign Total Score Trajectory")
+    refinement_motif_ca_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location="{plot_dir}/refinement_motif_rmsd_trajectory.png", title="Refinement Motif\nBB-Ca RMSD Trajectory", dims=(0,8))
 
     # cycle fastrelax, proteinmpnn and ESMFold
     for i in range(args.refinement_cycles):
-        ensembles, index_layers = fr_mpnn_esmfold(ensembles, prefix=(c_pref := f"refinement_cycle_{str(i).zfill(2)}"), index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir=pdb_dir)
-        cycle_filter = ensembles.filter_poses_by_score(5, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=3, plot=[f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"])
+        # refine
+        ensembles, index_layers = fr_mpnn_esmfold(ensembles, prefix=(c_pref := f"refinement_cycle_{str(i).zfill(2)}"), n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir=pdb_dir)
+        
+        # plot
+        esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
+        esm_bb_ca_rmsd_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_bb_ca_rmsd"], c_pref)
+        esm_motif_ca_rmsd_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_bb_ca_motif_rmsd"], c_pref)
+        esm_catres_rmsd_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_catres_motif_heavy_rmsd"], c_pref)
+        refinement_total_score_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_refinement_total_score"], c_pref)
+        refinement_motif_ca_rmsd_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_refinement_bb_ca_motif_rmsd"], c_pref)
+
+        #filter
+        cycle_filter = ensembles.filter_poses_by_score(5, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=2, plot=[f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"])
+        fr_n = 5
+
+    # make new results, copy fragments and write alignment_script
+    results_dir = f"{args.output_dir}/results/"
+    ref_frag_dir = f"{results_dir}/ref_fragments/"
+    if not os.path.isdir(ref_frag_dir): os.makedirs(ref_frag_dir, exist_ok=True)
+    ensembles.dump_poses(results_dir)
+
+    # Copy and rewrite Fragments into output_dir/reference_fragments
+    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=ref_frag_dir, keep_ligand_chain=args.ligand_chain)
+
+    # Write PyMol Alignment Script
+    ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
+    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"{c_pref}_esm_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
+
+
 
     print("done")
 
@@ -356,6 +398,7 @@ if __name__ == "__main__":
     argparser.add_argument("--output_scoreterms", type=str, default="esm_plddt,esm_bb_ca_motif_rmsd", help="Scoreterms to use to filter ESMFolded PDBs to the final output pdbs. IMPORTANT: if you supply scoreterms, also supply weights and always check the filter output plots in the plots/ directory!")
     argparser.add_argument("--output_scoreterm_weights", type=str, default="-1,1", help="Weights for how to combine the scoreterms listed in '--output_scoreterms'")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of your ligand chain.")
+    argparser.add_argument("--num_outputs", type=int, default=50, help="Number of .pdb-files you would like to have as output.")
     args = argparser.parse_args()
 
     main(args)
