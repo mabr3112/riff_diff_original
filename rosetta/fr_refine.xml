@@ -37,7 +37,7 @@
 		<PyMOLMover name="pmm" keep_history="1" />
 		<VirtualRoot name="set_virtual_root" />
 		<AddConstraints name="add_ca_motif_cst" >
-                        <CoordinateConstraintGenerator name="set_ca_motif_constraint" residue_selector="motif" native="true" ca_only="true" align_reference="true" />
+                <CoordinateConstraintGenerator name="set_ca_motif_constraint" residue_selector="motif" native="true" ca_only="true" align_reference="true" />
 		</AddConstraints>
 		<AddConstraints name="add_bb_ca_cst" >
                         <CoordinateConstraintGenerator name="set_bb_ca_constraint" residue_selector="motif" native="false" ca_only="true" />
