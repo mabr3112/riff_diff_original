@@ -55,12 +55,16 @@
 		<Add mover_name="set_virtual_root" />
 		<Add mover_name="add_ca_motif_cst" />
 		<Add mover_name="add_bb_ca_cst" />
+		<Add mover_name="pmm" />
 		<Add mover_name="thread_sequence" />
+		<Add mover_name="pmm" />
 		<Add mover_name="add_cat_res_cst" />
 		<Add mover_name="fastrelax" />
+		<Add mover_name="pmm" />
 		<Add mover_name="rm_bb_ca_cst" />
 		ADD mover_name="add_bb_ca_cst" />
 		<Add mover_name="fastrelax" />
+		<Add mover_name="pmm" />
 		Add filter_name="packstat" />
 		Add filter_name="exposed_hydrophobics" />
 		Add filter_name="netcharge_total" />
