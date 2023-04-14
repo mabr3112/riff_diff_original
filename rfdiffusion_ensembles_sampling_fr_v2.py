@@ -16,6 +16,7 @@ import utils.plotting as plots
 import utils.biopython_tools
 import utils.pymol_tools
 from utils.plotting import PlottingTrajectory
+import utils.metrics as metrics
 
 def fr_mpnn_esmfold(poses, prefix:str, n:int, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir:str=None) -> Poses:
     '''AAA'''
@@ -30,20 +31,19 @@ def fr_mpnn_esmfold(poses, prefix:str, n:int, index_layers_to_reference:int=0, f
     poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference+1, num_mpnn_seqs=30, num_esm_inputs=10, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr, rmsd_weight=3)
     return poses, index_layers_to_reference + 2
 
-def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, ref_pdb_dir:str=None):
+def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, ref_pdb_dir:str=None, reference_location_col="input_poses"):
     '''AAA'''
     def collapse_dict_values(in_dict: dict) -> str:
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
-    def write_pose_opts(row: pd.Series, mpnn_col:str) -> str:
-        return f"-in:file:native {row['input_poses']} -parser:script_vars seq={row[mpnn_col]} motif_res={collapse_dict_values(row['motif_residues'])} cat_res={collapse_dict_values(row['fixed_residues'])}"
+    def write_pose_opts(row: pd.Series, mpnn_col:str, reference_location_col:str="input_poses") -> str:
+        return f"-in:file:native {row[reference_location_col]} -parser:script_vars seq={row[mpnn_col]} motif_res={collapse_dict_values(row['motif_residues'])} cat_res={collapse_dict_values(row['fixed_residues'])}"
 
     # mpnn design on backbones
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target=1 --sampling_temp=0.05", prefix=f"{prefix}_mpnn", fixed_positions_col="fixed_residues")
     
-    # check for pose opts:
-    if fastrelax_pose_opts not in poses.poses_df.columns:
-        mpnn_col = f"{prefix}_mpnn_sequence"
-        poses.poses_df[fastrelax_pose_opts] = [write_pose_opts(row, mpnn_col) for index, row in poses.poses_df.iterrows()]
+    # write pose_opts (because sequence changes every time!!!)
+    mpnn_col = f"{prefix}_mpnn_sequence"
+    poses.poses_df[fastrelax_pose_opts] = [write_pose_opts(row, mpnn_col, reference_location_col=reference_location_col) for index, row in poses.poses_df.iterrows()]
 
     # fastrelax
     fr_opts = f"-beta -parser:protocol {args.fastrelax_protocol}"
@@ -275,7 +275,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:1.1,min_dist:15\\',\\'type:monomer_contacts,weight:1.5\\',\\'type:substrate_contacts,weight:1.5\\'] potentials.guide_decay='quadratic' diffuser.T=50"
+    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:1,min_dist:5\\',\\'type:monomer_contacts,weight:1\\',\\'type:substrate_contacts,weight:1.5\\'] potentials.guide_decay='quadratic'"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
@@ -283,23 +283,33 @@ def main(args):
     _ = [ensembles.update_motif_res_mapping(motif_col=col, inpaint_prefix="rfdiffusion") for col in motif_cols]
     _ = ensembles.update_res_identities(identity_col="catres_identities", inpaint_prefix="rfdiffusion")
 
+    # calculate ROG and contacts:
+    ensembles.poses_df["rfdiffusion_rog"] = [metrics.calc_rog_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
+    ensembles.poses_df["rfdiffusion_contacts_short"] = [metrics.calc_intra_contacts_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
+    ensembles.poses_df["rfdiffusion_contacts_long"] = [metrics.calc_intra_contacts_of_pdb(pose, d_0=3.9, r_0=3.9) for pose in ensembles.poses_df["poses"].to_list()]
+
     # Filter down based on pLDDT and RMSD
     hal_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="rfdiffusion_template_bb_ca", remove_layers=1)
     hal_comp_score = ensembles.calc_composite_score("rfdiffusion_comp_score", ["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"], [-1, args.rfdiffusion_rmsd_weight])
     hal_sampling_filter = ensembles.filter_poses_by_score(args.num_rfdiffusion_outputs_per_input_backbone, "rfdiffusion_comp_score", prefix="rfdiffusion_sampling_filter", remove_layers=1, plot=["rfdiffusion_comp_score", "rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"])
     
     # calculate new pose_opts for partial diffusion:
-    ensembles.poses_df["partial_diffusion_contig_str"] = [convert_sampled_mask(contig) for contig in ensembles.poses_df["rfdiffusion_sampled_mask"].to_list()]
-    ensembles.poses_df["partial_diffusion_inpaint_seq"] = [create_inpaint_seq(contig, motif) for contig, motif in zip(ensembles.poses_df["partial_diffusion_contig_str"].to_list(), ensembles.poses_df["fixed_residues"].to_list())]
-    ensembles.poses_df["partial_diffusion_pose_opts"] = [f"'contigmap.contigs=[{contig}]' 'contigmap.inpaint_seq=[{inpaint_str}]'" for contig, inpaint_str in zip(ensembles.poses_df["partial_diffusion_contig_str"].to_list(), ensembles.poses_df["partial_diffusion_inpaint_seq"].to_list())]
+    #ensembles.poses_df["partial_diffusion_contig_str"] = [convert_sampled_mask(contig) for contig in ensembles.poses_df["rfdiffusion_sampled_mask"].to_list()]
+    #ensembles.poses_df["partial_diffusion_inpaint_seq"] = [create_inpaint_seq(contig, motif) for contig, motif in zip(ensembles.poses_df["partial_diffusion_contig_str"].to_list(), ensembles.poses_df["fixed_residues"].to_list())]
+    #ensembles.poses_df["partial_diffusion_pose_opts"] = [f"'contigmap.contigs=[{contig}]' 'contigmap.inpaint_seq=[{inpaint_str}]'" for contig, inpaint_str in zip(ensembles.poses_df["partial_diffusion_contig_str"].to_list(), ensembles.poses_df["partial_diffusion_inpaint_seq"].to_list())]
+
+    # Copy and rewrite Fragments into output_dir/reference_fragments
+    if not os.path.isdir((updated_ref_frags_dir := f"{ensembles.dir}/updated_reference_frags/")): os.makedirs(updated_ref_frags_dir)
+    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=updated_ref_frags_dir, keep_ligand_chain=args.ligand_chain)
+    ensembles.poses_df["updated_reference_frags_location"] = updated_ref_frags_dir + ensembles.poses_df["poses_description"] + ".pdb"
 
     # cycle MPNN and FastRelax:
     index_layers=1
     pdb_loc_col = "rfdiffusion_location"
-    fr_mpnn_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/fr_mpnn_rmsd_trajectory.png", title="Motif BB-Ca\nTrajectory", dims=(0,8))
+    fr_mpnn_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/fr_mpnn_rmsd_trajectory.png", title="Motif BB-Ca\nTrajectory", dims=(0,3))
     for i in range(3):
         # run mpnn and fr
-        ensembles, index_layers, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, ref_pdb_dir=pdb_dir)
+        ensembles, index_layers, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, ref_pdb_dir=pdb_dir, reference_location_col="updated_reference_frags_location")
 
         # plot
         fr_mpnn_rmsd_traj.add_and_plot(ensembles.poses_df[f"cycle_{str(i)}_fr_bb_ca_motif_rmsd"], f"cycle_{str(i)}")
@@ -345,6 +355,7 @@ def main(args):
     refinement_motif_ca_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/refinement_motif_rmsd_trajectory.png", title="Refinement Motif\nBB-Ca RMSD Trajectory", dims=(0,8))
 
     # cycle fastrelax, proteinmpnn and ESMFold
+    filter_layers = 2
     for i in range(args.refinement_cycles):
         # refine
         ensembles, index_layers = fr_mpnn_esmfold(ensembles, prefix=(c_pref := f"refinement_cycle_{str(i).zfill(2)}"), n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir=pdb_dir)
@@ -358,8 +369,9 @@ def main(args):
         refinement_motif_ca_rmsd_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_refinement_bb_ca_motif_rmsd"], c_pref)
 
         #filter
-        cycle_filter = ensembles.filter_poses_by_score(5, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=2, plot=[f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"])
+        cycle_filter = ensembles.filter_poses_by_score(5, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=filter_layers, plot=[f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"])
         fr_n = 5
+        filter_layers = 3
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
@@ -373,7 +385,6 @@ def main(args):
     # Write PyMol Alignment Script
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
     pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"{c_pref}_esm_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
-
 
     print("done")
 
