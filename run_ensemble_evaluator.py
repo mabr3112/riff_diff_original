@@ -934,20 +934,20 @@ if __name__ == "__main__":
     
     # PDB Options
     argparser.add_argument("--max_num", type=int, default=50, help="Number of pdb-files that will be created by pathsearch.")
-    argparser.add_argument("--pdb_length", type=int, default=69, help="Maximum length of the pdb-files that will be inpainted.")
+    argparser.add_argument("--pdb_length", type=int, default=100, help="Maximum length of the pdb-files that will be inpainted.")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="PDB letter for Ligand chain. The entire ligand chain will be used as a 'receptor' chain during hallucination.")
     #argparser.add_argument("--add_ligand", type=str, default="Z", help="PDB Letter for ligand chain if you want to add the ligand to the input pdb-files")
 
     # Filter Options
     argparser.add_argument("--max_linker_length", type=int, default=10, help="Maximum length of linkers that the fragments should be connected with.")
     argparser.add_argument("--short_linker_preference", type=float, default=0.01, help="Strength for how much short linkers should be upweighted in scoring.")
-    argparser.add_argument("--max_linker_distance", type=float, default=13, help="Maximum Distance that the linker should have.")
+    argparser.add_argument("--max_linker_distance", type=float, default=15, help="Maximum Distance that the linker should have.")
     argparser.add_argument("--weight_rotprob", type=float, default=1, help="Strength of the rotamer probability weight for filtering")
     argparser.add_argument("--weight_structure_quality", type=float, default=1, help="Strength of the structure quality weight for filtering")
-    argparser.add_argument("--sample_from_subset_fraction", type=float, default=0.02, help="Take random sample from top <subset> rows of DataFrame.")
+    argparser.add_argument("--sample_from_subset_fraction", type=float, default=0.2, help="Take random sample from top <subset> rows of DataFrame.")
 
     # Structure Quality
-    argparser.add_argument("--plddt_threshold", type=float, default=0, help="Threshold for filtering inpaint plddts during quality-score calculation")
+    argparser.add_argument("--plddt_threshold", type=float, default=0.85, help="Threshold for filtering inpaint plddts during quality-score calculation")
     argparser.add_argument("--rmsd_threshold", type=float, default=0.2, help="Threshold tolerance for RMSD during quality-score calculation")
     argparser.add_argument("--rmsd_strength", type=float, default=1, help="Strength for RMSD filtering if RMSD is above the Threshold. For quality-score calculation")
     args = argparser.parse_args()

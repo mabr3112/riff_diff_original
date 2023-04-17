@@ -199,6 +199,9 @@ def adjust_flanking(rfdiffusion_pose_opts: str, flanking_type: str, total_flanke
     reassembled = f"{nterm}/{middle}/{cterm}"
     return rfdiffusion_pose_opts.replace(contig, reassembled)
 
+def superimpose_reference_frags():
+    '''AAA'''
+
 def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_col:str, motif_prefix: str, out_pdb_path=None, keep_ligand_chain:str="") -> list[str]:
     ''''''
     list_of_mappings = [utils.biopython_tools.residue_mapping_from_motif(ref_motif, inp_motif) for ref_motif, inp_motif in zip(input_df[f"{motif_prefix}_con_ref_pdb_idx"].to_list(), input_df[f"{motif_prefix}_con_hal_pdb_idx"].to_list())]
@@ -242,6 +245,28 @@ def parse_diffusion_options(default_opts: str, additional_opts: str) -> str:
     def_opts_dict = {x.split("=")[0]: "=".join(x.split("=")[1:]) for x in def_opts}
     return " ".join([f"{k}={v}" for k, v in def_opts_dict.items()])
 
+def check_for_params(path: str, ligand_chain: str):
+    '''Checks if params-file is present in output of run_ensemble_evaluator.py //
+        If no params file could be generated, then we also do not want Rosetta to use the ligand information.
+    
+        TODO: Implement flag -extra_res_fa if params file is found to make sure that the ligand is properly loaded.
+    '''
+    if os.path.isfile(f"{path}/ligand/LG1.params"): return ligand_chain
+    else: return None
+
+def calc_ligand_stats(input_df: pd.DataFrame, ref_frags_col:str, fixed_motif_col:str, ref_motif_col:str, prefix:str, ligand_chain:str="Z") -> None:
+    '''
+    Superimposes the poses onto reference fragments in input_df[ref_frags_col] by specified motifs in input_df. Then calculates statistics over ligands. (if it is clashing and the number of contacts).
+    '''
+    # superimpose reference frags onto poses to make sure ligand calculation works in the same coordinate frame:
+    poses = [superimpose_pdb_by_motif(ref_frag, pose, fixed_motif=ref_motif, mobile_motif=pose_motif, atoms=["CA"]) for pose, ref_frag, pose_motif_motif, ref_motif in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list(), input_df[fixed_motif_col].to_list(), input_df[ref_motif_col].to_list())]
+
+    # calculate statistics of ligands:
+    input_df[f"{prefix}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, dist=1.8, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
+    input_df[f"{prefix}_peratom_ligand_contacts"] = [utils.metrics.calc_ligand_contacts(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, d_0=3.5, r_0=3.5, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
+
+    return input_df
+
 def main(args):
     # print Status
     print(f"\n{'#'*50}\nRunning rfdiffusion_ensembles_sampling.py on {args.input_dir}\n{'#'*50}\n")
@@ -252,6 +277,7 @@ def main(args):
     ensembles.max_rfdiffusion_gpus = args.max_rfdiffusion_gpus
     plotdir = f"{ensembles.dir}/plots"
     plot_dir = ensembles.plot_dir
+    keep_ligand_chain = check_for_params(args.input_dir, args.ligand_chain)
 
     # Read scores of selected paths from ensemble_evaluator and store them in poses_df:
     path_df = pd.read_json(f"{args.input_dir}/selected_paths.json").reset_index().rename(columns={"index": "rdescription"})
@@ -293,15 +319,14 @@ def main(args):
     hal_comp_score = ensembles.calc_composite_score("rfdiffusion_comp_score", ["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"], [-1, args.rfdiffusion_rmsd_weight])
     hal_sampling_filter = ensembles.filter_poses_by_score(args.num_rfdiffusion_outputs_per_input_backbone, "rfdiffusion_comp_score", prefix="rfdiffusion_sampling_filter", remove_layers=1, plot=["rfdiffusion_comp_score", "rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"])
     
-    # calculate new pose_opts for partial diffusion:
-    #ensembles.poses_df["partial_diffusion_contig_str"] = [convert_sampled_mask(contig) for contig in ensembles.poses_df["rfdiffusion_sampled_mask"].to_list()]
-    #ensembles.poses_df["partial_diffusion_inpaint_seq"] = [create_inpaint_seq(contig, motif) for contig, motif in zip(ensembles.poses_df["partial_diffusion_contig_str"].to_list(), ensembles.poses_df["fixed_residues"].to_list())]
-    #ensembles.poses_df["partial_diffusion_pose_opts"] = [f"'contigmap.contigs=[{contig}]' 'contigmap.inpaint_seq=[{inpaint_str}]'" for contig, inpaint_str in zip(ensembles.poses_df["partial_diffusion_contig_str"].to_list(), ensembles.poses_df["partial_diffusion_inpaint_seq"].to_list())]
-
     # Copy and rewrite Fragments into output_dir/reference_fragments
     if not os.path.isdir((updated_ref_frags_dir := f"{ensembles.dir}/updated_reference_frags/")): os.makedirs(updated_ref_frags_dir)
-    updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=updated_ref_frags_dir, keep_ligand_chain=args.ligand_chain)
-    ensembles.poses_df["updated_reference_frags_location"] = updated_ref_frags_dir + ensembles.poses_df["poses_description"] + ".pdb"
+    
+    ensembles.poses_df["updated_reference_frags_location"] = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=updated_ref_frags_dir, keep_ligand_chain=keep_ligand_chain)
+    #ensembles.poses_df["updated_reference_frags_location"] = updated_ref_frags_dir + ensembles.poses_df["poses_description"] + ".pdb"
+    
+    # superimpose reference fragments and calculate ligand stats
+    
 
     # cycle MPNN and FastRelax:
     index_layers=1
@@ -356,9 +381,11 @@ def main(args):
 
     # cycle fastrelax, proteinmpnn and ESMFold
     filter_layers = 2
+    index_layers_to_remove = 2
+    idx = index_layers
     for i in range(args.refinement_cycles):
         # refine
-        ensembles, index_layers = fr_mpnn_esmfold(ensembles, prefix=(c_pref := f"refinement_cycle_{str(i).zfill(2)}"), n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir=pdb_dir)
+        ensembles, index_layers_n = fr_mpnn_esmfold(ensembles, prefix=(c_pref := f"refinement_cycle_{str(i).zfill(2)}"), n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir=pdb_dir)
         
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
@@ -370,8 +397,13 @@ def main(args):
 
         #filter
         cycle_filter = ensembles.filter_poses_by_score(5, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=filter_layers, plot=[f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"])
+        
+        # reindex poses
+        index_removed = ensembles.reindex_poses(out_dir=f"{c_pref}_reindexed_poses", remove_layers=index_layers_to_remove)
         fr_n = 5
         filter_layers = 3
+        index_layers_to_remove = 3
+        index_layers = idx+1
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
