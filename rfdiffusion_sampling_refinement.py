@@ -25,13 +25,11 @@ def fr_mpnn_esmfold(poses, prefix:str, n:int, index_layers_to_reference:int=0, f
     fr_opts = f"-beta -parser:protocol {args.refinement_protocol}"
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=n, prefix=f"{prefix}_refinement")
     
-    # calculate RMSDs and filter
+    # calculate RMSDs
     rmsds = poses.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=poses.poses_df["template_motif"].to_list(), target_motif=poses.poses_df["motif_residues"].to_list(), metric_prefix=f"{prefix}_refinement_bb_ca", remove_layers=index_layers_to_reference+1)
-    fr_comp_score = poses.calc_composite_score(f"{prefix}_fr_comp_score", [f"{prefix}_refinement_total_score", f"{prefix}_refinement_bb_ca_motif_rmsd"], [1,1])
-    fr_filter = poses.filter_poses_by_score(2, f"{prefix}_fr_comp_score", remove_layers=1, prefix=f"{prefix}_refinement_filter", plot=[f"{prefix}_refinement_total_score", f"{prefix}_refinement_bb_ca_motif_rmsd"])
 
     # design and predict:
-    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference+1, num_mpnn_seqs=48, num_esm_inputs=16, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr, rmsd_weight=3)
+    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference+1, num_mpnn_seqs=30, num_esm_inputs=10, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr, rmsd_weight=3)
     return poses, index_layers_to_reference + 2
 
 def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, ref_pdb_dir:str=None, reference_location_col="input_poses"):
@@ -260,6 +258,7 @@ def main(args):
     if args.flanking: ensembles.poses_df["rfdiffusion_pose_opts"] = [adjust_flanking(rfdiffusion_pose_opts_str, args.flanking, args.total_flanker_length) for rfdiffusion_pose_opts_str in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
     elif args.total_flanker_length:
         raise ValueError(f"Argument 'total_flanker_length' was given, but not 'flanking'! Both args have to be provided.")
+    #print(ensembles.poses_df.iloc[0]["diffusion_pose_opts"])
 
     # Check if merger was successful:
     if len(ensembles.poses_df) == len(ensembles.poses): print(f"Loading of Pose contigs into poses_df successful. Continuing to hallucination.")
@@ -271,7 +270,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:1000,min_dist:0.1\\',\\'type:substrate_contacts,weight:5\\'] potentials.guide_decay='quadratic'"
+    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:1,min_dist:5\\',\\'type:monomer_contacts,weight:1\\',\\'type:substrate_contacts,weight:1.5\\'] potentials.guide_decay='quadratic'"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
@@ -284,10 +283,11 @@ def main(args):
     ensembles.poses_df["rfdiffusion_contacts_short"] = [metrics.calc_intra_contacts_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
     ensembles.poses_df["rfdiffusion_contacts_long"] = [metrics.calc_intra_contacts_of_pdb(pose, d_0=3.9, r_0=3.9) for pose in ensembles.poses_df["poses"].to_list()]
 
-    # Calculate RMSD and composite score:
+    # Filter down based on pLDDT and RMSD
     diffusion_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="rfdiffusion_template_bb_ca", remove_layers=1)
     diffusion_comp_score = ensembles.calc_composite_score("rfdiffusion_comp_score", ["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"], [-1, args.rfdiffusion_rmsd_weight])
-
+    diffusion_sampling_filter = ensembles.filter_poses_by_score(args.num_rfdiffusion_outputs_per_input_backbone, "rfdiffusion_comp_score", prefix="rfdiffusion_sampling_filter", remove_layers=1, plot=["rfdiffusion_comp_score", "rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"])
+    
     # Copy and rewrite Fragments into output_dir/reference_fragments
     if not os.path.isdir((updated_ref_frags_dir := f"{ensembles.dir}/updated_reference_frags/")): os.makedirs(updated_ref_frags_dir)
     
@@ -297,22 +297,11 @@ def main(args):
     # superimpose poses on reference frags and calculate ligand scores:
     if keep_ligand_chain: calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="rfdiffusion", ligand_chain=args.ligand_chain)
 
-    # remove clashing structures:
-    ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["rfdiffusion_ligand_clash"] == False]
-
-    # filter based on rfdiffusion pLDDT (implement args.rfdiffusion_plddt_fraction):
-    rfdiff_plddt_filter = ensembles.filter_poses_by_score(0.8, "rfdiffusion_plddt", prefix="rfdiffusion_plddt_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts"])
-
-    # filter based on ligand_contacts:
-    rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.7, "rfdiffusion_peratom_ligand_contacts", prefix="rfdiffusion_ligand_contacts_filter", plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts"])
-    
     # cycle MPNN and FastRelax:
     index_layers=1
     pdb_loc_col = "rfdiffusion_location"
     fr_mpnn_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/fr_mpnn_rmsd_trajectory.png", title="Motif BB-Ca\nTrajectory", dims=(0,3))
     for i in range(3):
-        cycle_prefix = f"cycle_{str(i)}"
-
         # run mpnn and fr
         ensembles, index_layers, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, ref_pdb_dir=pdb_dir, reference_location_col="updated_reference_frags_location")
 
@@ -324,12 +313,6 @@ def main(args):
 
     # superimpose poses on reference frags and calculate ligand scores:
     if keep_ligand_chain: calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="pre_esm", ligand_chain=args.ligand_chain)
-
-    # remove clashing poses:
-    ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["pre_esm_ligand_clash"] == False]
-
-    # filter down by total_score to max_esm_inputs:
-    total_score_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, f"{cycle_prefix}_fr_total_score", prefix=f"pre_mpnn_filter", plot=["pre_esm_peratom_ligand_contacts", f"{cycle_prefix}_fr_total_score"])
 
     # run mpnn and predict with ESMFold:
     ensembles, index_layers = mpnn_design_and_esmfold(ensembles, prefix="round1", index_layers_to_reference=index_layers, num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_dir=fr_pdb_dir, ref_pdb_dir=pdb_dir)
@@ -377,8 +360,7 @@ def main(args):
     idx = index_layers
     for i in range(args.refinement_cycles):
         # refine
-        ensembles.poses_df["refinement_opts"] = ensembles.poses_df["fr_pose_opts"].str.replace(" -parser:script_vars ", f" -parser:script_vars sd={str(0.5 + i)} ")
-        ensembles, index_layers_n = fr_mpnn_esmfold(ensembles, prefix=(c_pref := f"refinement_cycle_{str(i).zfill(2)}"), n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="refinement_opts", ref_pdb_dir=pdb_dir)
+        ensembles, index_layers_n = fr_mpnn_esmfold(ensembles, prefix=(c_pref := f"refinement_cycle_{str(i).zfill(2)}"), n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir=pdb_dir)
         
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
@@ -428,20 +410,19 @@ if __name__ == "__main__":
     argparser.add_argument("--refinement_cycles", type=int, default=5, help="Number of Fastrelax-mpnn-esmfold refinement cycles to run.")
 
     # rfdiffusion options
-    argparser.add_argument("--num_rfdiffusions", type=int, default=15, help="Number of rfdiffusion trajectories.")
-    argparser.add_argument("--rfdiffusion_timesteps", type=int, default=20, help="Number of RFdiffusion timesteps to diffuse.")
+    argparser.add_argument("--num_rfdiffusions", type=int, default=5, help="Number of rfdiffusion trajectories.")
+    argparser.add_argument("--rfdiffusion_timesteps", type=int, default=50, help="Number of RFdiffusion timesteps to diffuse.")
     argparser.add_argument("--rfdiffusion_rmsd_weight", type=float, default=3, help="Weight of hallucination RMSD score for filtering sampled hallucination")
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=15, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
     argparser.add_argument("--total_flanker_length", type=int, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
-    argparser.add_argument("--num_rfdiffusion_outputs_per_input_backbone", type=int, default=15, help="Number of rfdiffusions that should be kept per input fragment.")
+    argparser.add_argument("--num_rfdiffusion_outputs_per_input_backbone", type=int, default=5, help="Number of rfdiffusions that should be kept per input fragment.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
 
     # mpnn options
-    argparser.add_argument("--num_mpnn_inputs", type=int, default=250, help="Number of input backbones to ProteinMPNN before predicting them with ESMFold")
-    argparser.add_argument("--num_mpnn_seqs", type=int, default=80, help="Number of MPNN Sequences to generate for each input backbone.")
-    argparser.add_argument("--num_esm_inputs", type=int, default=30, help="Number of MPNN Sequences for each input backbone that should be predicted. Typically quarter to half of the sequences generated by MPNN is a good value.")
+    argparser.add_argument("--num_mpnn_seqs", type=int, default=50, help="Number of MPNN Sequences to generate for each input backbone.")
+    argparser.add_argument("--num_esm_inputs", type=int, default=20, help="Number of MPNN Sequences for each input backbone that should be predicted. Typically quarter to half of the sequences generated by MPNN is a good value.")
     argparser.add_argument("--num_esm_outputs_per_input_backbone", type=int, default=1, help="Number of ESM Outputs for each backbone that is inputted to ESMFold.")
 
     # output options
