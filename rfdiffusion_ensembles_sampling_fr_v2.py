@@ -238,6 +238,20 @@ def calc_ligand_stats(input_df: pd.DataFrame, ref_frags_col:str, ref_motif_col:s
 
     return input_df
 
+def overwrite_linker_length(pose_opts: str, total_length:int, max_linker_length:int=100) -> str:
+    '''overwrites linker length and allows linkers to be of any length (with at least the provided linker length)'''
+    # extract contig string from pose_opts
+    full_contig_str = [x for x in pose_opts.split(" ") if x.startswith("'contigmap.contigs")][0]
+    contig_str = full_contig_str[full_contig_str.find("[")+1:full_contig_str.find("]")]
+    contigs = [x for x in contig_str.split("/") if x][1:-1]
+    
+    # replace fixed linkers in contigs string with linker ranges
+    new_contigs = "/".join([x if x[0].isalpha() else f"{x}-{str(max_linker_length)}" for x in contigs])
+    new_contig_str = full_contig_str.replace("/".join(contigs), new_contigs)
+
+    # return replaced contig pose-opts:
+    return pose_opts.replace(full_contig_str, f"{new_contig_str} contigmap.length={str(total_length)} ")
+
 def main(args):
     # print Status
     print(f"\n{'#'*50}\nRunning rfdiffusion_ensembles_sampling.py on {args.input_dir}\n{'#'*50}\n")
@@ -260,6 +274,11 @@ def main(args):
     if args.flanking: ensembles.poses_df["rfdiffusion_pose_opts"] = [adjust_flanking(rfdiffusion_pose_opts_str, args.flanking, args.total_flanker_length) for rfdiffusion_pose_opts_str in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
     elif args.total_flanker_length:
         raise ValueError(f"Argument 'total_flanker_length' was given, but not 'flanking'! Both args have to be provided.")
+    
+    # adjust linkers if overwrite_linker_lengths option was set:
+    if args.overwrite_linker_lengths:
+        total_length, linker_length = [int(x) for x in args.overwrite_linker_lengths.split(",")]
+        ensembles.poses_df["rfdiffusion_pose_opts"] = [overwrite_linker_length(pose_opts) for pose_opts in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
 
     # Check if merger was successful:
     if len(ensembles.poses_df) == len(ensembles.poses): print(f"Loading of Pose contigs into poses_df successful. Continuing to hallucination.")
@@ -432,11 +451,14 @@ if __name__ == "__main__":
     argparser.add_argument("--rfdiffusion_timesteps", type=int, default=20, help="Number of RFdiffusion timesteps to diffuse.")
     argparser.add_argument("--rfdiffusion_rmsd_weight", type=float, default=3, help="Weight of hallucination RMSD score for filtering sampled hallucination")
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=15, help="On how many GPUs at a time to you want to run Hallucination?")
-    argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
-    argparser.add_argument("--total_flanker_length", type=int, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
     argparser.add_argument("--num_rfdiffusion_outputs_per_input_backbone", type=int, default=15, help="Number of rfdiffusions that should be kept per input fragment.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
+
+    # linkers
+    argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
+    argparser.add_argument("--total_flanker_length", type=int, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
+    argparser.add_argument("--overwrite_linker_lengths", type=str, default=None, help="specify first total length of the protein, then maximum length that should be assigned to the linkers.\nExample: --overwrite_linekr_lengths='200,75' -> would set the maximum length of the protein to 200 and would overwrite the linkers to ranges between ~5-75.")
 
     # mpnn options
     argparser.add_argument("--num_mpnn_inputs", type=int, default=250, help="Number of input backbones to ProteinMPNN before predicting them with ESMFold")
