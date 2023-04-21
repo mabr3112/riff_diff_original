@@ -8,4 +8,4 @@ def convert_pdb_to_mol(pdb_path: str, out_path:str=None, removeHs:bool=False) ->
     with open(out_path, 'w') as f:
         f.write(sdf)
 
-    return out_path
+    return out_path 
