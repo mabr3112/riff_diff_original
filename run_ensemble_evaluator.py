@@ -371,9 +371,8 @@ def sample_from_path_df(df: pd.DataFrame, n: int, random_sample_subset_fraction:
     ''''''
     if random_sample_subset_fraction:
         # take subset (if fraction is 1, subset = full set!!)
-        subset_df = df.sort_values(by="rotprob_and_quality", ascending=False).head(int(round(len(df)*random_sample_subset_fraction)))
-        out_size = np.min([n, len(subset_df)])
-        sampled_df = subset_df.sample(out_size)
+        subset_df = df.sort_values(by="rotprob_and_quality", ascending=False).head(np.max([n, int(round(len(df)*random_sample_subset_fraction))])) # if n is lower than subset, take
+        sampled_df = subset_df.sample(n)
     else:
         sampled_df = df.sort_values(by="rotprob_and_quality", ascending=False).head(n)
     return sampled_df
@@ -611,7 +610,8 @@ def main(args):
     scaling_params_file = f"{script_dir}/models/scaling_params_10k2.json"
     path_to_fragment = f"{script_dir}/utils/helix.pdb"
     
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}/log.txt")
+    if args.debug: logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}/log.txt")
+    else: logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}/log.txt")
 
     # load input data
     logging.info(f"Loading fragments from ensemble file {args.input_dir}")
@@ -844,13 +844,17 @@ def main(args):
     full_path_df["mean_quality_adjusted"] = full_path_df["mean_quality"] + args.plddt_threshold
 
     # Remove Paths from Path DataFrame that have a quality score of 0, ore have linker distance and linker length above the specified threshold
+    logging.debug(f"length before distance filtering: {len(full_path_df)}")
     path_plddt_df = full_path_df[full_path_df[[col for col in full_path_df.columns if col.endswith("distance")]].max(axis=1) < args.max_linker_distance]
+    logging.debug(f"length after distance filtering: {len(full_path_df)}")
     logging.info(f"Filtered {len(full_path_df) - len(path_plddt_df)} paths with linker distance higher than {args.max_linker_distance}")
     top_path_df = filter_paths(path_plddt_df, min_quality=0.0000000000001, max_linker_length=args.max_linker_length)
+    logging.debug(f"length after quality score filtering: {len(full_path_df)}")
     logging.info(f"Filtered {len(path_plddt_df)-len(top_path_df)} paths with quality scores of ~0")
 
     # Extract top (args.max_num) rows from the filtered Path DataFrame.
     selected_path_df = sample_from_path_df(top_path_df, n=args.max_num, random_sample_subset_fraction=args.sample_from_subset_fraction)
+    logging.debug(f"length after sampling: {len(full_path_df)}")
     logging.info(f"Selected {len(selected_path_df)} paths from Path DataFrame.")
 
     ##################### Plotting #########################################################
@@ -950,6 +954,10 @@ if __name__ == "__main__":
     argparser.add_argument("--plddt_threshold", type=float, default=0.85, help="Threshold for filtering inpaint plddts during quality-score calculation")
     argparser.add_argument("--rmsd_threshold", type=float, default=0.2, help="Threshold tolerance for RMSD during quality-score calculation")
     argparser.add_argument("--rmsd_strength", type=float, default=1, help="Strength for RMSD filtering if RMSD is above the Threshold. For quality-score calculation")
+
+    # logging:
+    argparser.add_argument("--debug", default=None, help="Use Logging configuration DEBUG")
+
     args = argparser.parse_args()
 
     if args.sample_from_subset_fraction > 1: raise ValueError(f"random_sample_subset_fraction can only be value between 0 and 1!")
