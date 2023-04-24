@@ -250,7 +250,7 @@ def overwrite_linker_length(pose_opts: str, total_length:int, max_linker_length:
     new_contig_str = full_contig_str.replace("/".join(contigs), new_contigs)
 
     # return replaced contig pose-opts:
-    return pose_opts.replace(full_contig_str, f"{new_contig_str} contigmap.length={str(total_length)} ")
+    return pose_opts.replace(full_contig_str, f"{new_contig_str} contigmap.length={str(total_length)}-{str(total_length)} ")
 
 def main(args):
     # print Status
@@ -277,8 +277,8 @@ def main(args):
     
     # adjust linkers if overwrite_linker_lengths option was set:
     if args.overwrite_linker_lengths:
-        total_length, linker_length = [int(x) for x in args.overwrite_linker_lengths.split(",")]
-        ensembles.poses_df["rfdiffusion_pose_opts"] = [overwrite_linker_length(pose_opts) for pose_opts in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
+        linker_length, total_length = [int(x) for x in args.overwrite_linker_lengths.split(",")]
+        ensembles.poses_df["rfdiffusion_pose_opts"] = [overwrite_linker_length(pose_opts, total_length, linker_length) for pose_opts in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
 
     # Check if merger was successful:
     if len(ensembles.poses_df) == len(ensembles.poses): print(f"Loading of Pose contigs into poses_df successful. Continuing to hallucination.")
@@ -290,7 +290,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:1000,min_dist:0.1\\',\\'type:substrate_contacts,weight:5\\'] potentials.guide_decay='quadratic'"
+    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:{args.ROG_weight},min_dist:0.1\\',\\'type:substrate_contacts,weight:5\\'] potentials.guide_decay='quadratic'"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
@@ -454,6 +454,7 @@ if __name__ == "__main__":
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
     argparser.add_argument("--num_rfdiffusion_outputs_per_input_backbone", type=int, default=15, help="Number of rfdiffusions that should be kept per input fragment.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
+    argparser.add_argument("--ROG_weight", type=int, default=200, help="Weight of monomer_ROG potential. Important for small porteins")
 
     # linkers
     argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
