@@ -290,7 +290,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG,weight:{args.ROG_weight},min_dist:0.1\\',\\'type:substrate_contacts,weight:5\\'] potentials.guide_decay='quadratic'"
+    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG_new,weight:{args.ROG_weight}\\',\\'type:substrate_centroid,weight:7\\',\\'type:substrate_contacts,weight:4\\'] potentials.guide_decay='quadratic'"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
@@ -311,7 +311,6 @@ def main(args):
     if not os.path.isdir((updated_ref_frags_dir := f"{ensembles.dir}/updated_reference_frags/")): os.makedirs(updated_ref_frags_dir)
     
     ensembles.poses_df["updated_reference_frags_location"] = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=updated_ref_frags_dir, keep_ligand_chain=keep_ligand_chain)
-    #ensembles.poses_df["updated_reference_frags_location"] = updated_ref_frags_dir + ensembles.poses_df["poses_description"] + ".pdb"
     
     # superimpose poses on reference frags and calculate ligand scores:
     if keep_ligand_chain: calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="rfdiffusion", ligand_chain=args.ligand_chain)
@@ -323,7 +322,7 @@ def main(args):
     rfdiff_plddt_filter = ensembles.filter_poses_by_score(0.8, "rfdiffusion_plddt", prefix="rfdiffusion_plddt_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts"])
 
     # filter based on ligand_contacts:
-    rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.7, "rfdiffusion_peratom_ligand_contacts", prefix="rfdiffusion_ligand_contacts_filter", plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts"])
+    rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.3, "rfdiffusion_peratom_ligand_contacts", prefix="rfdiffusion_ligand_contacts_filter", plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts"])
     
     # cycle MPNN and FastRelax:
     index_layers=1
@@ -448,21 +447,21 @@ if __name__ == "__main__":
 
     # rfdiffusion options
     argparser.add_argument("--num_rfdiffusions", type=int, default=15, help="Number of rfdiffusion trajectories.")
-    argparser.add_argument("--rfdiffusion_timesteps", type=int, default=20, help="Number of RFdiffusion timesteps to diffuse.")
+    argparser.add_argument("--rfdiffusion_timesteps", type=int, default=50, help="Number of RFdiffusion timesteps to diffuse.")
     argparser.add_argument("--rfdiffusion_rmsd_weight", type=float, default=3, help="Weight of hallucination RMSD score for filtering sampled hallucination")
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=15, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
     argparser.add_argument("--num_rfdiffusion_outputs_per_input_backbone", type=int, default=15, help="Number of rfdiffusions that should be kept per input fragment.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
-    argparser.add_argument("--ROG_weight", type=int, default=200, help="Weight of monomer_ROG potential. Important for small porteins")
+    argparser.add_argument("--ROG_weight", type=int, default=5, help="Weight of monomer_ROG potential. Important for small porteins")
 
     # linkers
     argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
     argparser.add_argument("--total_flanker_length", type=int, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
-    argparser.add_argument("--overwrite_linker_lengths", type=str, default=None, help="specify first total length of the protein, then maximum length that should be assigned to the linkers.\nExample: --overwrite_linekr_lengths='200,75' -> would set the maximum length of the protein to 200 and would overwrite the linkers to ranges between ~5-75.")
+    argparser.add_argument("--overwrite_linker_lengths", type=str, default='200,50', help="specify first total length of the protein, then maximum length that should be assigned to the linkers.\nExample: --overwrite_linekr_lengths='200,75' -> would set the maximum length of the protein to 200 and would overwrite the linkers to ranges between ~5-75.")
 
     # mpnn options
-    argparser.add_argument("--num_mpnn_inputs", type=int, default=250, help="Number of input backbones to ProteinMPNN before predicting them with ESMFold")
+    argparser.add_argument("--num_mpnn_inputs", type=int, default=200, help="Number of input backbones to ProteinMPNN before predicting them with ESMFold")
     argparser.add_argument("--num_mpnn_seqs", type=int, default=80, help="Number of MPNN Sequences to generate for each input backbone.")
     argparser.add_argument("--num_esm_inputs", type=int, default=30, help="Number of MPNN Sequences for each input backbone that should be predicted. Typically quarter to half of the sequences generated by MPNN is a good value.")
     argparser.add_argument("--num_esm_outputs_per_input_backbone", type=int, default=1, help="Number of ESM Outputs for each backbone that is inputted to ESMFold.")
