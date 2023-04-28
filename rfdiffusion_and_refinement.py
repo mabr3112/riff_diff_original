@@ -305,7 +305,7 @@ def main(args):
 
     # Calculate RMSD and composite score:
     diffusion_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="rfdiffusion_template_bb_ca", remove_layers=1)
-    diffusion_comp_score = ensembles.calc_composite_score("rfdiffusion_comp_score", ["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"], [-1, args.rfdiffusion_rmsd_weight])
+    #diffusion_comp_score = ensembles.calc_composite_score("rfdiffusion_comp_score", ["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"], [-1, args.rfdiffusion_rmsd_weight])
 
     # Copy and rewrite Fragments into output_dir/reference_fragments
     if not os.path.isdir((updated_ref_frags_dir := f"{ensembles.dir}/updated_reference_frags/")): os.makedirs(updated_ref_frags_dir)
@@ -347,7 +347,8 @@ def main(args):
     ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["pre_esm_ligand_clash"] == False]
 
     # filter down by total_score to max_esm_inputs:
-    total_score_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, f"{cycle_prefix}_fr_total_score", prefix=f"pre_mpnn_filter", plot=["pre_esm_peratom_ligand_contacts", f"{cycle_prefix}_fr_total_score"])
+    pre_mpnn_comp_score = ensembles.calc_composite_score("pre_mpnn_comp_score", [f"{cycle_prefix}_fr_total_score", f"pre_esm_peratom_ligand_contacts"], [2, 1])
+    total_score_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, f"pre_mpnn_comp_score", prefix=f"pre_mpnn_filter", plot=["pre_esm_peratom_ligand_contacts", f"{cycle_prefix}_fr_total_score", f"{cycle_prefix}_fr_bb_ca_motif_rmsd"])
 
     # run mpnn and predict with ESMFold:
     ensembles, index_layers = mpnn_design_and_esmfold(ensembles, prefix="round1", index_layers_to_reference=index_layers, num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_dir=fr_pdb_dir, ref_pdb_dir=pdb_dir)
@@ -446,28 +447,26 @@ if __name__ == "__main__":
     argparser.add_argument("--refinement_cycles", type=int, default=5, help="Number of Fastrelax-mpnn-esmfold refinement cycles to run.")
 
     # rfdiffusion options
-    argparser.add_argument("--num_rfdiffusions", type=int, default=15, help="Number of rfdiffusion trajectories.")
+    argparser.add_argument("--num_rfdiffusions", type=int, default=25, help="Number of rfdiffusion trajectories.")
     argparser.add_argument("--rfdiffusion_timesteps", type=int, default=50, help="Number of RFdiffusion timesteps to diffuse.")
-    argparser.add_argument("--rfdiffusion_rmsd_weight", type=float, default=3, help="Weight of hallucination RMSD score for filtering sampled hallucination")
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=15, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
-    argparser.add_argument("--num_rfdiffusion_outputs_per_input_backbone", type=int, default=15, help="Number of rfdiffusions that should be kept per input fragment.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
-    argparser.add_argument("--ROG_weight", type=int, default=5, help="Weight of monomer_ROG potential. Important for small porteins")
+    argparser.add_argument("--ROG_weight", type=int, default=4, help="Weight of monomer_ROG potential. Important for small porteins")
 
     # linkers
-    argparser.add_argument("--flanking", type=str, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
-    argparser.add_argument("--total_flanker_length", type=int, default=None, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
+    argparser.add_argument("--flanking", type=str, default="cterm", help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
+    argparser.add_argument("--total_flanker_length", type=int, default=40, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
     argparser.add_argument("--overwrite_linker_lengths", type=str, default='200,50', help="specify first total length of the protein, then maximum length that should be assigned to the linkers.\nExample: --overwrite_linekr_lengths='200,75' -> would set the maximum length of the protein to 200 and would overwrite the linkers to ranges between ~5-75.")
 
     # mpnn options
-    argparser.add_argument("--num_mpnn_inputs", type=int, default=200, help="Number of input backbones to ProteinMPNN before predicting them with ESMFold")
-    argparser.add_argument("--num_mpnn_seqs", type=int, default=80, help="Number of MPNN Sequences to generate for each input backbone.")
-    argparser.add_argument("--num_esm_inputs", type=int, default=30, help="Number of MPNN Sequences for each input backbone that should be predicted. Typically quarter to half of the sequences generated by MPNN is a good value.")
+    argparser.add_argument("--num_mpnn_inputs", type=int, default=150, help="Number of input backbones to ProteinMPNN before predicting them with ESMFold")
+    argparser.add_argument("--num_mpnn_seqs", type=int, default=120, help="Number of MPNN Sequences to generate for each input backbone.")
+    argparser.add_argument("--num_esm_inputs", type=int, default=40, help="Number of MPNN Sequences for each input backbone that should be predicted. Typically quarter to half of the sequences generated by MPNN is a good value.")
     argparser.add_argument("--num_esm_outputs_per_input_backbone", type=int, default=1, help="Number of ESM Outputs for each backbone that is inputted to ESMFold.")
 
     # output options
-    argparser.add_argument("--num_refinement_inputs", type=int, default=10, help="Number of .pdb files that will be stored into the final output directory.")
+    argparser.add_argument("--num_refinement_inputs", type=int, default=20, help="Number of .pdb files that will be stored into the final output directory.")
     argparser.add_argument("--output_scoreterms", type=str, default="esm_plddt,esm_bb_ca_motif_rmsd", help="Scoreterms to use to filter ESMFolded PDBs to the final output pdbs. IMPORTANT: if you supply scoreterms, also supply weights and always check the filter output plots in the plots/ directory!")
     argparser.add_argument("--output_scoreterm_weights", type=str, default="-1,1.5", help="Weights for how to combine the scoreterms listed in '--output_scoreterms'")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of your ligand chain.")
