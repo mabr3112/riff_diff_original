@@ -35,16 +35,16 @@
 		<PyMOLMover name="pmm" keep_history="1" />
 		<VirtualRoot name="set_virtual_root" />
 		<AddConstraints name="add_ca_motif_cst" >
-                <CoordinateConstraintGenerator name="set_ca_motif_constraint" residue_selector="motif" native="true" ca_only="true" align_reference="true" />
+                	<CoordinateConstraintGenerator name="set_ca_motif_constraint" residue_selector="motif" native="true" ca_only="true" align_reference="true" />
 		</AddConstraints>
 		<AddConstraints name="add_bb_ca_cst" >
-                        <CoordinateConstraintGenerator name="set_bb_ca_constraint" residue_selector="motif" native="false" ca_only="true" sd="%%sd%%"/>
+                        <CoordinateConstraintGenerator name="set_bb_ca_constraint" native="false" ca_only="true" sd="%%sd%%"/>
 		</AddConstraints>
 		<AddConstraints name="add_cat_res_cst" >
 			<CoordinateConstraintGenerator name="set_cat_res_constraint" residue_selector="catres" native="true" sidechain="true" align_reference="true" />
 		</AddConstraints>
 		<AddConstraints name="add_substrate_cst" >
-			<CoordinateConstraintGenerator name="set_cat_res_constraint" residue_selector="substrate" native="false" sidechain="true" />
+			<CoordinateConstraintGenerator name="set_substrate_constraint" residue_selector="substrate" native="false" sidechain="true" />
 		</AddConstraints>
 		<RemoveConstraints name="rm_bb_ca_cst" constraint_generators="set_bb_ca_constraint" />
 		<SavePoseMover name="save_start_pose" restore_pose="0" reference_name="start_pose" />
@@ -63,7 +63,7 @@
 		<Add mover_name="pmm" />
 		<Add mover_name="fastdesign" />
 		<Add mover_name="pmm" />
-		<Add mover_name="rm_bb_ca_cst" />
+		Add mover_name="rm_bb_ca_cst" />
 		<Add mover_name="fastdesign" />
 		<Add mover_name="pmm" />
 		Add filter_name="packstat" />

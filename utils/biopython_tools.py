@@ -3,6 +3,8 @@ import Bio
 from Bio.PDB import PDBIO
 import Bio.PDB
 import copy
+import numpy as np
+from collections import defaultdict
 
 def load_structure_from_pdbfile(path_to_pdb: str, all_models=False) -> Bio.PDB.Structure:
     '''AAA'''

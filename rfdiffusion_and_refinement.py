@@ -58,10 +58,10 @@ def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_o
 
     return poses, index_layers_to_reference+1, fr
 
-def write_fastdesign_pose_opts(row: pd.Series, cycle: int, reference_location_col:str, designres_col: str, motif_res_col: str, cat_res_col: str) -> str:
+def write_fastdesign_opts(row: pd.Series, cycle: int, reference_location_col:str, designres_col: str, motif_res_col: str, cat_res_col: str) -> str:
     def collapse_dict_values(in_dict: dict) -> str:
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
-    return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[design_res_col]['A'])} substrate_chain={args.ligand_chain} sd={0.5 + cycle}"
+    return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.5 + cycle}"
 
 def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, ref_pdb_dir:str=None, bb_rmsd_dir:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None):
     '''AAA'''
@@ -257,12 +257,12 @@ def overwrite_linker_length(pose_opts: str, total_length:int, max_linker_length:
     # return replaced contig pose-opts:
     return pose_opts.replace(full_contig_str, f"{new_contig_str} contigmap.length={str(total_length)}-{str(total_length)} ")
 
-def get_design_residues(row: pd.Series, motif_res_col:str, lig_chain:str) -> dict:
+def get_design_residues(row: pd.Series, motif_res_col:str, cat_res_col: str, lig_chain:str) -> dict:
     ''' calculates design residues from poses '''
     pose = utils.biopython_tools.load_structure_from_pdbfile(row["poses"])
     motif_centroid_res = utils.biopython_tools.select_motif_centroid_contacts(pose, motif=row[motif_res_col], dist=8, pose_sidechains_only=True)
     lig_contacts = utils.biopython_tools.select_ligand_contacts(pose, ligand_chain=lig_chain, dist=7, pose_sidechains_only=True)
-    return concat_motifs([motif_centrlid_res, lig_contacts])["A"]
+    return {"A": utils.biopython_tools.concat_motifs([motif_centroid_res, lig_contacts, row[cat_res_col]])["A"]}
 
 def main(args):
     # print Status
@@ -279,7 +279,7 @@ def main(args):
     # Read scores of selected paths from ensemble_evaluator and store them in poses_df:
     path_df = pd.read_json(f"{args.input_dir}/selected_paths.json").reset_index().rename(columns={"index": "rdescription"})
     ensembles.poses_df = ensembles.poses_df.merge(path_df, left_on="poses_description", right_on="rdescription")
-    ensembles.max_rosetta_cpus = 500
+    ensembles.max_rosetta_cpus = 1000
     ensembles.max_mpnn_gpus = 10
 
     # change cterm and nterm flankers according to input args.
@@ -410,11 +410,14 @@ def main(args):
     idx = index_layers
     for i in range(args.refinement_cycles):
         c_pref = f"refinement_cycle_{str(i).zfill(2)}"
+        # copy the ligand into the structures:
+        lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"{c_pref}_lig_poses")
+
         # refine
-        ensemble.poses_df[f"{c_pref}_mpnn_fixed_residues"] = [get_design_residues(row, motif_res_col="motif_residues", lig_chain=args.ligand_chain) for index, row in ensembles.poses_df.iterrows()]
-        ensembles.poses_df["fastdesign_opts"] = [write_fastdesign_opts(row, cycle=i, ref_pdb_location_col="updated_reference_frags_location", motif_res_col="motif_residues", cat_res_col="fixed_residues", design_res_col=f"{c_pref}_mpnn_fixed_residues") for index, row in ensembles.poses_df.iterrows()]
+        ensembles.poses_df[f"{c_pref}_mpnn_fixed_residues"] = [get_design_residues(row, motif_res_col="motif_residues", cat_res_col="fixed_residues", lig_chain=args.ligand_chain) for index, row in ensembles.poses_df.iterrows()]
+        ensembles.poses_df["fastdesign_opts"] = [write_fastdesign_opts(row, cycle=i, reference_location_col="updated_reference_frags_location", motif_res_col="motif_residues", cat_res_col="fixed_residues", designres_col=f"{c_pref}_mpnn_fixed_residues") for index, row in ensembles.poses_df.iterrows()]
         ensembles.poses_df["refinement_opts"] = ensembles.poses_df["fr_pose_opts"].str.replace(" -parser:script_vars ", f" -parser:script_vars sd={str(0.5 + i)} ")
-        ensembles, index_layers_n = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="fastdesign_opts", ref_pdb_dir=pdb_dir, mpnn_fixedres_col=f"{c_pref}_mpnnn_fixed_residues")
+        ensembles, index_layers_n = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="fastdesign_opts", ref_pdb_dir=pdb_dir, mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues")
         
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
@@ -439,6 +442,10 @@ def main(args):
 
     # filter poses down by backbone:
     if args.filter_results_by_backbone: post_refinement_filter = ensembles.filter_poses_by_score(1, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_post_refinement_filter", remove_layers=filter_layers-2, plot=fst)
+
+    ########################## FINAL MPNN SOLUBLE DESGIN ################################################################
+    # add back the ligand
+    lig_poses = ensembles.add_ligand_from_ref()
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
