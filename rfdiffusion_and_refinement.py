@@ -63,10 +63,10 @@ def write_fastdesign_opts(row: pd.Series, cycle: int, reference_location_col:str
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
     return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.5 + cycle}"
 
-def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, ref_pdb_dir:str=None, bb_rmsd_dir:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None):
+def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, ref_pdb_dir:str=None, bb_rmsd_dir:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False):
     '''AAA'''
     # Run MPNN and filter (by half)
-    mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues")
+    mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues", use_soluble_model=use_soluble_model)
     mpnn_seqfilter = poses.filter_poses_by_score(num_esm_inputs, f"{prefix}_mpnn_score", prefix=f"{prefix}_mpnn_seqfilter", remove_layers=1)
 
     # Run ESMFold and calc bb_ca_rmsd, motif_ca_rmsd and motif_heavy RMSD
@@ -445,7 +445,14 @@ def main(args):
 
     ########################## FINAL MPNN SOLUBLE DESGIN ################################################################
     # add back the ligand
-    lig_poses = ensembles.add_ligand_from_ref()
+    lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"final_redesign_lig_poses")
+
+    # write options and run Rosetta Refinement:
+    final_redesign_opts = f"-parser:protocol {script_dir}/rosetta/fastrelax_coordinate_constrained.xml -parser:script_vars substrate_chain={args.ligand_chain} -beta"
+    final_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=5, prefix=f"final_fastrelax")
+
+    # mpnn and esm:
+    ensembles, index_layers = mpnn_design_and_esmfold(ensembles, f"final_redesign", index_layers_to_reference=index_layers, num_mpnn_seqs=20, num_esm_inputs=8, num_esm_outputs_per_input_backbone=1, ref_pdb_dir=pdb_dir, bb_rmsd_dir=final_fr, mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
