@@ -264,6 +264,17 @@ def get_design_residues(row: pd.Series, motif_res_col:str, cat_res_col: str, lig
     lig_contacts = utils.biopython_tools.select_ligand_contacts(pose, ligand_chain=lig_chain, dist=7, pose_sidechains_only=True)
     return {"A": utils.biopython_tools.concat_motifs([motif_centroid_res, lig_contacts, row[cat_res_col]])["A"]}
 
+def mpnn_probs_fd(poses, motif_col:str):
+    '''AAA'''
+    # collect mpnn_probabilities from poses and write resfiles
+
+    # write fastdesign pose_options and run fastdesign
+
+    # predict w/ ESMFold and calculate stats
+
+    # plot 
+    return poses, index_layers
+
 def main(args):
     # print Status
     print(f"\n{'#'*50}\nRunning rfdiffusion_ensembles_sampling.py on {args.input_dir}\n{'#'*50}\n")
@@ -455,7 +466,7 @@ def main(args):
     ensembles, index_layers = mpnn_design_and_esmfold(ensembles, f"final_redesign", index_layers_to_reference=index_layers+1, num_mpnn_seqs=20, num_esm_inputs=8, num_esm_outputs_per_input_backbone=1, ref_pdb_dir=pdb_dir, bb_rmsd_dir=final_fr, mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
 
     # final backbone downsampling
-    final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_plddt", prefix=f"output_filter", remove_layers=2)
+    final_downsampling = ensembles.filter_pose_by_score(1, f"final_redesign_esm_plddt", prefix=f"output_filter", remove_layers=2)
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"

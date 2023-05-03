@@ -10,8 +10,6 @@
 		<Layer name="core_res" select_core="true" />
 		<Layer name="surface_res" select_surface="true" />
 		<Not name="not_surface_res" selector="surface_res" />
-		<Index name="motif" resnums="%%motif_res%%" />
-		<Index name="catres" resnums="%%cat_res%%" />
 		<Chain name="substrate" chains="%%substrate_chain%%" />
 	</RESIDUE_SELECTORS>
 	<TASKOPERATIONS>
@@ -26,7 +24,7 @@
 		<PyMOLMover name="pmm" keep_history="1" />
 		<VirtualRoot name="set_virtual_root" />
 		<AddConstraints name="add_bb_ca_cst" >
-                        <CoordinateConstraintGenerator name="set_bb_ca_constraint" residue_selector="motif" native="false" ca_only="true" />
+                        <CoordinateConstraintGenerator name="set_bb_ca_constraint" native="false" ca_only="true" />
 		</AddConstraints>
 		<AddConstraints name="add_substrate_cst" >
                         <CoordinateConstraintGenerator name="set_substrate_constraint" residue_selector="substrate" native="false" sidechain="true" />
