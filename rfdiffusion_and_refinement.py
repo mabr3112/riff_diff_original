@@ -302,7 +302,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG_new,weight:{args.ROG_weight}\\',\\'type:substrate_centroid,weight:7\\',\\'type:substrate_contacts,weight:4\\'] potentials.guide_decay='quadratic'"
+    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:monomer_ROG_new,weight:{args.ROG_weight}\\',\\'type:substrate_centroid,weight:{args.substrate_centroid_weight}\\',\\'type:substrate_contacts,weight:4\\'] potentials.guide_decay='quadratic'"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
@@ -455,7 +455,14 @@ def main(args):
     ensembles, index_layers = mpnn_design_and_esmfold(ensembles, f"final_redesign", index_layers_to_reference=index_layers+1, num_mpnn_seqs=20, num_esm_inputs=8, num_esm_outputs_per_input_backbone=1, ref_pdb_dir=pdb_dir, bb_rmsd_dir=final_fr, mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
 
     # final backbone downsampling
-    final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_plddt", prefix=f"output_filter", remove_layers=2)
+    final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_comp_score", prefix=f"output_filter", remove_layers=2)
+    
+    # add back the ligand
+    lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"output_lig_poses")
+
+    # write options and run Rosetta Refinement:
+    final_redesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_coordinate_constrained.xml -parser:script_vars substrate_chain={args.ligand_chain} -beta"
+    output_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=1, prefix=f"output_fastrelax")
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
@@ -468,7 +475,7 @@ def main(args):
 
     # Write PyMol Alignment Script
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
-    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"{c_pref}_esm_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
+    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"final_redesign_esm_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
 
     print("done")
 
@@ -490,6 +497,7 @@ if __name__ == "__main__":
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
     argparser.add_argument("--ROG_weight", type=int, default=4, help="Weight of monomer_ROG potential. Important for small porteins")
+    argparser.add_argument("--substrate_centroid_weight", type=float, default=10, help="Weight of Substrate Centroid potential")
 
     # linkers
     argparser.add_argument("--flanking", type=str, default="cterm", help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")

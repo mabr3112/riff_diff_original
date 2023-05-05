@@ -173,11 +173,15 @@ def get_protein_atoms(pose: Bio.PDB.Structure.Structure, ligand_chain:str=None, 
     '''Selects atoms from a pose object. If ligand_chain is given, excludes all atoms in ligand_chain'''
     # define chains of pose
     chains = [x.id for x in pose.get_chains()]
+    print("chains", chains)
     if ligand_chain: chains.remove(ligand_chain)
+    print("after 'removal'", chains)
 
     # select specified atoms
     pose_atoms = [atom for chain in chains for atom in pose[chain].get_atoms()]
+    print("within function", pose_atoms)
     if atms: pose_atoms = [atom for atom in pose_atoms if atom.id in atms]
+    print("within function2", pose_atoms)
 
     return pose_atoms
 
@@ -257,9 +261,11 @@ def select_ligand_contacts(pose: Bio.PDB.Structure.Structure, ligand_chain: str,
 def select_motif_centroid_contacts(pose: Bio.PDB.Structure.Structure, motif:dict, dist:float, pose_sidechains_only:bool=True):
     '''Selects residues that are close to the center of mass of an input motif.'''
     # extract pose coords
-    pose_atoms = [x for x in get_protein_atoms(pose)]
-    if pose_sidechains_only: pose_atoms = [atom for atom in pose_atoms if not atom.id in ["N", "CA", "C", "O"]]
-    pose_coords = np.array([atom.coord for atom in pose_atoms])
+    pose_atoms = [x for x in get_protein_atoms(pose, atms=["CA"])]
+    print(pose_atoms)
+    if pose_sidechains_only: pose_atoms = [atom for atom in pose_atoms if atom.id in ["N", "CA", "C", "O"]]
+    pose_coords = np.array([atom.get_coord() for atom in pose_atoms])
+    print(pose_coords)
 
     # calculate centroid of all motif atoms:
     motif_atoms = get_atoms_of_motif(pose, motif=motif)
