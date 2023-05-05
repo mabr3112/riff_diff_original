@@ -253,6 +253,7 @@ def calc_ligand_stats(input_df: pd.DataFrame, ref_frags_col:str, ref_motif_col:s
     # calculate statistics of ligands:
     input_df[f"{prefix}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, dist=1.4, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
     input_df[f"{prefix}_peratom_ligand_contacts"] = [utils.metrics.calc_ligand_contacts_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, d_0=3.5, r_0=3.5, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
+    input_df[f"{prefix}_pocket_score"] = [utils.metrics.calc_pocket_score(utils.biopython_tools.load_structure_from_pdbfile(pose), ligand_chain=ligand_chain, rep_weight=4, coordination_strength=5) for pose in poses]
 
     return input_df
 
@@ -330,6 +331,7 @@ def main(args):
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
+    ######################### RFDiffusion POSTPROCESSING #####################################################
     # Update motif_res and fixedres to residue mapping after rfdiffusion 
     _ = [ensembles.update_motif_res_mapping(motif_col=col, inpaint_prefix="rfdiffusion") for col in motif_cols]
     _ = ensembles.update_res_identities(identity_col="catres_identities", inpaint_prefix="rfdiffusion")
@@ -352,13 +354,13 @@ def main(args):
     if keep_ligand_chain: calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="rfdiffusion", ligand_chain=args.ligand_chain)
 
     # remove clashing structures:
-    ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["rfdiffusion_ligand_clash"] == False]
+    #ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["rfdiffusion_ligand_clash"] == False]
 
     # filter based on rfdiffusion pLDDT (implement args.rfdiffusion_plddt_fraction):
     rfdiff_plddt_filter = ensembles.filter_poses_by_score(0.8, "rfdiffusion_plddt", prefix="rfdiffusion_plddt_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts"])
 
     # filter based on ligand_contacts:
-    rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.3, "rfdiffusion_peratom_ligand_contacts", prefix="rfdiffusion_ligand_contacts_filter", plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts"])
+    rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.5, "rfdiffusion_pocket_score", prefix="rfdiffusion_ligand_contacts_filter", plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts"])
     ######################## MPNN-FASTDesign-MPNN #################################################
     # cycle MPNN and FastRelax:
     index_layers=1
@@ -380,12 +382,11 @@ def main(args):
     if keep_ligand_chain: calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="pre_esm", ligand_chain=args.ligand_chain)
 
     # remove clashing poses:
-    ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["pre_esm_ligand_clash"] == False]
+    #ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["pre_esm_ligand_clash"] == False]
 
     # filter down by total_score to max_esm_inputs:
-    pre_mpnn_comp_score = ensembles.calc_composite_score("pre_mpnn_comp_score", [f"{cycle_prefix}_fr_total_score", f"pre_esm_peratom_ligand_contacts"], [2, 1])
-    total_score_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, f"pre_mpnn_comp_score", prefix=f"pre_mpnn_filter", plot=["pre_esm_peratom_ligand_contacts", f"{cycle_prefix}_fr_total_score", f"{cycle_prefix}_fr_bb_ca_motif_rmsd"])
-
+    pre_mpnn_comp_score = ensembles.calc_composite_score("pre_esm_comp_score", [f"{cycle_prefix}_fr_total_score", f"pre_esm_pocket_score"], [2, 1])
+    total_score_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, f"pre_esm_comp_score", prefix=f"pre_mpnn_filter", plot=["pre_esm_peratom_ligand_contacts", f"{cycle_prefix}_fr_total_score", f"{cycle_prefix}_fr_bb_ca_motif_rmsd"])
 
     ######################### ROUND1 ESMFold ###############################################
     # run mpnn and predict with ESMFold:
