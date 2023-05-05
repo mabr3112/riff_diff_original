@@ -479,7 +479,14 @@ def main(args):
     ensembles, index_layers = mpnn_design_and_esmfold(ensembles, f"final_redesign", index_layers_to_reference=index_layers+1, num_mpnn_seqs=20, num_esm_inputs=8, num_esm_outputs_per_input_backbone=1, ref_pdb_dir=pdb_dir, bb_rmsd_dir=final_fr, mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
 
     # final backbone downsampling
-    final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_plddt", prefix=f"output_filter", remove_layers=2)
+    final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_comp_score", prefix=f"output_filter", remove_layers=2)
+
+    # add back the ligand
+    lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"output_lig_poses")
+
+    # write options and run Rosetta Refinement:
+    final_redesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_coordinate_constrained.xml -parser:script_vars substrate_chain={args.ligand_chain} -beta"
+    output_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=1, prefix=f"output_fastrelax")
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
