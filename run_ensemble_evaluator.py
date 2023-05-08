@@ -378,7 +378,7 @@ def sample_from_path_df(df: pd.DataFrame, n: int, random_sample_subset_fraction:
     return sampled_df
 
 ######################### PDB-File Reassembly #####################################################
-def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict, add_ligand=None):
+def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict, input_dir: str, add_ligand=None):
     '''assembles pdb-files for input to either hallucination of RFdiffusion (recommended).
     Parameters:
         add_ligand, str:  name of the ligand chain. (e.g. Z, or X are most often Ligand Chains.)
@@ -402,7 +402,7 @@ def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict
     # go over each fragment and add it into the empty pose. Add chain names alphabetically
     for i, fragment in enumerate(get_fragments(path_series)):
         fragment_dict = fragment_dict_dict[fragment]
-        frag_pose = load_structure_from_pdbfile(f"{args.input_dir}/{fragment_dict['origin']}", all_models=True)[fragment_dict["frag_num"]]["A"]
+        frag_pose = load_structure_from_pdbfile(f"{input_dir}/{fragment_dict['origin']}", all_models=True)[fragment_dict["frag_num"]]["A"]
         frag_pose.detach_parent()
             
         # set name of chains alphabetically
@@ -412,7 +412,7 @@ def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict
 
     # add ligand from last fragment, if option is set:
     if add_ligand:
-        lig = load_structure_from_pdbfile(f"{args.input_dir}/{fragment_dict['origin']}", all_models=True)[fragment_dict["frag_num"]][add_ligand]
+        lig = load_structure_from_pdbfile(f"{input_dir}/{fragment_dict['origin']}", all_models=True)[fragment_dict["frag_num"]][add_ligand]
         lig.detach_parent()
         pose.add(lig)
 
@@ -537,13 +537,13 @@ def compile_hallucination_pose_opts(input_series: pd.Series, fragment_dict: dict
 
     return f"--mask {contig_str} --force_aa {force_aa_str}"
 
-def find_ligand_name(fragment, fragment_dict: dict, ligand_chain="Z") -> str:
+def find_ligand_name(fragment, fragment_dict: dict, input_dir: str, ligand_chain="Z") -> str:
     '''returns name of Ligand in fragment'''
     fragment_d = fragment_dict[fragment]
-    frag_pose = load_structure_from_pdbfile(f"{args.input_dir}/{fragment_d['origin']}", all_models=True)[fragment_d["frag_num"]][ligand_chain]
+    frag_pose = load_structure_from_pdbfile(f"{input_dir}/{fragment_d['origin']}", all_models=True)[fragment_d["frag_num"]][ligand_chain]
     return [x for x in frag_pose.get_residues()][0].get_resname()
 
-def compile_rfdiffusion_pose_opts(input_series: pd.Series, fragment_dict: dict, max_length=74, flanking="split", ligand_chain="Z"):
+def compile_rfdiffusion_pose_opts(input_series: pd.Series, fragment_dict: dict, input_dir: str, max_length=74, flanking="split", ligand_chain="Z"):
     '''Compile and write pose opts for RFdiffusion'''
     fragments = get_fragments(input_series)
     fragment_contigs = get_fragments_contigs(fragments, fragment_dict)
@@ -555,9 +555,35 @@ def compile_rfdiffusion_pose_opts(input_series: pd.Series, fragment_dict: dict, 
     inpaint_seq = compile_inpaint_seq(fragments, fragment_dict).replace(",", "/")
 
     # find ligand name:
-    lig_name = find_ligand_name(fragments[-1], fragment_dict=fragment_dict, ligand_chain=ligand_chain)
+    lig_name = find_ligand_name(fragments[-1], fragment_dict=fragment_dict, input_dir=input_dir, ligand_chain=ligand_chain)
 
     return f"'contigmap.contigs=[{contig_str}]' 'contigmap.inpaint_seq=[{inpaint_seq}]' potentials.substrate={lig_name}"
+
+def get_covalent_bonds(input_series: pd.DataFrame, fragments_dict: dict, input_dir: str) -> str:
+    ''''''
+    def get_lig_info(fragment_d: dict, input_dir: str) -> "tuple[int,str]":
+        frag_pose = load_structure_from_pdbfile(f"{input_dir}/{fragment_d['origin']}", all_models=True)[fragment_d["frag_num"]][fragment_d['fragment_picking_info']['ligand_chain']]
+        lig_res = [x for x in frag_pose.get_residues()][0]
+        return lig_res.id[1], lig_res.get_resname()
+    
+    def compile_covalent_bond_str(i_d: dict, fragment_index: int, lig_resnum: int, lig_name: str) -> str:
+        cov_bond_list = [x.split(":") for x in i_d["fragment_picking_info"]["covalent_bond"].split(",") if x]
+        chain = chr(ord('A')+fragment_index)
+        return ','.join([f"{i_d['res_num']}{chain}_{i_d['identity']}_{cov_bond[0]}:{str(lig_resnum)}{i_d['fragment_picking_info']['ligand_chain']}_{lig_name}_{cov_bond[1]}" for cov_bond in cov_bond_list])
+
+    # collect all fragments of fragment ensemble (row)
+    extracted_frag_dicts = [fragments_dict[fragment] for fragment in get_fragments(input_series)]
+
+    # collect lig info for cov_bond str:
+    lig_resnum, lig_name = get_lig_info(extracted_frag_dicts[0], input_dir=input_dir)
+
+    # find all covalent bonds in all fragments and compile them into a list:
+    cov_bonds = list()
+    for i, frag_d in enumerate(extracted_frag_dicts):
+        if "covalent_bond" in frag_d["fragment_picking_info"]:
+            cov_bonds.append(compile_covalent_bond_str(frag_d, fragment_index=i, lig_resnum=lig_resnum, lig_name=lig_name))
+
+    return ",".join(cov_bonds)
 
 def write_inpaint_contigs_to_json(input_df: pd.DataFrame, json_path: str, fragment_dict: dict, max_length: int) -> dict:
     '''AAA'''
@@ -614,9 +640,11 @@ def main(args):
     else: logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}/log.txt")
 
     # load input data
-    logging.info(f"Loading fragments from ensemble file {args.input_dir}")
-    with open(glob(f"{args.input_dir}/*.json")[0], 'r') as f:
+    logging.info(f"Loading fragments from ensemble file {args.input_json}")
+    with open(args.input_json, 'r') as f:
         input_dict = json.loads(f.read())
+
+    input_dir = "/".join(args.input_json.split("/")[:-1])
 
     # look for how many chains are in the dictionary
     chains = list(input_dict["0"].keys())
@@ -641,7 +669,7 @@ def main(args):
     def extract_cols_from_dict(in_dict, cols_list: list) -> dict:
         return {k: v for k, v in in_dict.items() if k in cols_list}
 
-    out_cols = ['identity', 'origin', 'res_num', 'rot_prob', "frag_length", "frag_num"]
+    out_cols = ['identity', 'origin', 'res_num', 'rot_prob', "frag_length", "frag_num", "fragment_picking_info"]
     unique_fragments_dict = {f"{fchain}{input_dict[row][fchain]['frag_num']}": extract_cols_from_dict(input_dict[row][fchain], out_cols) for row in input_dict for fchain in chains}
     logging.info(f"Extracted data of {len(unique_fragments_dict)} unique fragments.")
 
@@ -887,7 +915,7 @@ def main(args):
 
     # Store pdb-files of reassembled Fragments at <out_path>
     logging.info(f"Generating PDB-files for top {len(selected_path_df)} fragment ensembles at {pdb_dir}")
-    pdb_files = [assemble_pdb(selected_path_df.loc[index], out_path=pdb_dir, fragment_dict_dict=unique_fragments_dict, add_ligand=args.ligand_chain) for index in selected_path_df.index]
+    pdb_files = [assemble_pdb(selected_path_df.loc[index], out_path=pdb_dir, input_dir=input_dir, fragment_dict_dict=unique_fragments_dict, add_ligand=args.ligand_chain) for index in selected_path_df.index]
 
     # write contigs for inpainting
     inpaint_contigs_path = f"{args.output_dir}/inpaint_pose_opts.json" # output path to inpaint contigs file
@@ -897,16 +925,21 @@ def main(args):
     # compile motif_residues, fixed_residues and catres_identities for inpainting:
     logging.info(f"Compiling motif_residues, fixed_residues and catres_identities for inpainting.")
     selected_fragments = selected_path_df.index
-    fixedres_df = pd.DataFrame.from_dict({"fixed_residues": {index: get_fixed_res(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
-    motif_res_df = pd.DataFrame.from_dict({"motif_residues": {index: get_motif_res(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
-    motif_identities_df = pd.DataFrame.from_dict({"catres_identities": {index: get_res_identity(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments}})
-    hallucination_pose_opts_df = pd.DataFrame.from_dict({"hallucination_pose_opts": {index: compile_hallucination_pose_opts(selected_path_df.loc[index], unique_fragments_dict, max_length=args.pdb_length) for index in selected_fragments}})
-    rfdiff_pose_opts_df = pd.DataFrame.from_dict({"rfdiffusion_pose_opts": {index: compile_rfdiffusion_pose_opts(selected_path_df.loc[index], unique_fragments_dict, max_length=args.pdb_length, ligand_chain=args.ligand_chain) for index in selected_fragments}})
-    selected_path_df = selected_path_df.join([fixedres_df, motif_res_df, motif_identities_df, hallucination_pose_opts_df, rfdiff_pose_opts_df, pd.DataFrame.from_dict({"inpainting_pose_opts": contigs_dict})])
+    output_datadict = {
+        "fixed_residues": {index: get_fixed_res(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments},
+        "motif_residues": {index: get_motif_res(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments},
+        "catres_identities" : {index: get_res_identity(selected_path_df.loc[index], unique_fragments_dict) for index in selected_fragments},
+        "hallucination_pose_opts": {index: compile_hallucination_pose_opts(selected_path_df.loc[index], unique_fragments_dict, max_length=args.pdb_length) for index in selected_fragments},
+        "rfdiffusion_pose_opts": {index: compile_rfdiffusion_pose_opts(selected_path_df.loc[index], unique_fragments_dict, input_dir=input_dir, max_length=args.pdb_length, ligand_chain=args.ligand_chain) for index in selected_fragments},
+        "inpainting_pose_opts": contigs_dict,
+        "covalent_bonds": {index: get_covalent_bonds(selected_path_df.loc[index], unique_fragments_dict, input_dir=input_dir) for index in selected_fragments}
+    }
+    
+    selected_path_df = selected_path_df.join([pd.DataFrame.from_dict(output_datadict)])
 
     # store Ligand in separate folder for hallucionation.
     os.makedirs((lig_folder := f"{args.output_dir}/ligand/"), exist_ok=True)
-    x_pdb_path = glob(f"{args.input_dir}/*.pdb")[0]
+    x_pdb_path = glob(f"{input_dir}/*.pdb")[0]
     x_pdb = load_structure_from_pdbfile(x_pdb_path)
     ligand = x_pdb[args.ligand_chain]
     ligand_pdbfile = utils.biopython_tools.store_pose(ligand, (lig_path:=f"{lig_folder}/LG1.pdb"))
@@ -933,7 +966,7 @@ if __name__ == "__main__":
     import argparse
 
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    argparser.add_argument("--input_dir", type=str, required=True, help="Directory containing the .json input file and the .pdb files that are linked to it. (Output Directory of Fragment Generation)")
+    argparser.add_argument("--input_json", type=str, required=True, help="File containing the .json input file located in the same directory as the .pdb files that are linked to it. (Output Directory of Fragment Generation)")
     argparser.add_argument("--output_dir", type=str, required=True, help="Path to the output directory where the .pdb files and options for inpainting should be written to.")
     
     # PDB Options
