@@ -19,10 +19,10 @@ from utils.plotting import PlottingTrajectory
 import utils.metrics as metrics
 import superimposition_tools
 
-def fr_mpnn_esmfold(poses, prefix:str, n:int, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None) -> Poses:
+def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None) -> Poses:
     '''AAA'''
     # run fastrelax on predicted poses
-    fr_opts = f"-beta -parser:protocol {args.refinement_protocol}"
+    fr_opts = f"-beta -parser:protocol {args.refinement_protocol} -extra_res_fa {args.input_dir}/ligand/LG1.params"
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=n, prefix=f"{prefix}_refinement")
     
     # calculate RMSDs and filter
@@ -32,8 +32,8 @@ def fr_mpnn_esmfold(poses, prefix:str, n:int, index_layers_to_reference:int=0, f
     fr_filter = poses.filter_poses_by_score(2, f"{prefix}_fr_comp_score", remove_layers=1, prefix=f"{prefix}_refinement_filter", plot=[f"{prefix}_refinement_total_score", f"{prefix}_refinement_bb_ca_motif_rmsd"])
 
     # design and predict:
-    poses, index_layers = mpnn_design_and_esmfold(poses, prefix=prefix, index_layers_to_reference=index_layers_to_reference+1, num_mpnn_seqs=48, num_esm_inputs=16, num_esm_outputs_per_input_backbone=5, ref_pdb_dir=ref_pdb_dir, bb_rmsd_dir=fr, rmsd_weight=3, mpnn_fixedres_col=mpnn_fixedres_col)
-    return poses, index_layers_to_reference + 2
+    poses = mpnn_design_and_esmfold(poses, prefix=prefix, num_mpnn_seqs=48, num_esm_inputs=16, num_esm_outputs_per_input_backbone=5, motif_ref_pdb_col=ref_pdb_col, bb_rmsd_dir=fr, rmsd_weight=3, mpnn_fixedres_col=mpnn_fixedres_col)
+    return poses
 
 def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, reference_location_col="input_poses"):
     '''AAA'''
@@ -46,7 +46,7 @@ def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_o
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target=1 --sampling_temp=0.05", prefix=f"{prefix}_mpnn", fixed_positions_col="fixed_residues")
 
     # reset poses to Structures:
-    fr_opts = f"-beta -parser:protocol {args.fastrelax_protocol}"
+    fr_opts = f"-beta -parser:protocol {args.fastrelax_protocol} -extra_res_fa {args.input_dir}/ligand/LG1.params"
     poses.poses_df["poses"] = poses.poses_df[pdb_location_col]
     poses.poses_df["poses_description"] = poses.poses_df["poses"].str.split("/").str[-1].str.replace(".pdb","")
 
@@ -70,14 +70,17 @@ def mpnn_fr(poses, prefix:str, index_layers_to_reference:int=0, fastrelax_pose_o
     # calculate motif RMSDs
     fr_motif_ca_rmsds = poses.calc_motif_bb_rmsd_df(ref_pdb=reference_location_col, ref_motif="motif_residues", target_motif="motif_residues", metric_prefix=f"{prefix}_fr_bb_ca")
 
-    return poses, index_layers_to_reference+1, fr
+    return poses, fr
+
+def collapse_dict_values(in_dict: dict) -> str:
+    return ",".join([str(y) for x in in_dict.values() for y in list(x)])
 
 def write_fastdesign_opts(row: pd.Series, cycle: int, reference_location_col:str, designres_col: str, motif_res_col: str, cat_res_col: str) -> str:
     def collapse_dict_values(in_dict: dict) -> str:
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
     return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.5 + cycle}"
 
-def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues"):
+def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues"):
     '''AAA'''
     # Run MPNN and filter (by half)
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues", use_soluble_model=use_soluble_model)
@@ -102,7 +105,7 @@ def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, 
     y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]"]
     dims = [(0,100), (0,15), (0,8), (0,8)]
     _ = plots.violinplot_multiple_cols(poses.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plotdir}/{prefix}_esm_stats.png")
-    return poses, index_layers_to_reference+1
+    return poses
 
 def convert_sampled_mask(old_contig):
     '''converts sampled mask output of RFDiffusion into new motif'''
@@ -279,6 +282,20 @@ def get_design_residues(row: pd.Series, motif_res_col:str, cat_res_col: str, lig
     lig_contacts = utils.biopython_tools.select_ligand_contacts(pose, ligand_chain=lig_chain, dist=7, pose_sidechains_only=True)
     return {"A": utils.biopython_tools.concat_motifs([motif_centroid_res, lig_contacts, row[cat_res_col]])["A"]}
 
+def update_covalent_bonds_str(covalent_bonds_str: str, template_motif: dict, motif: dict) -> str:
+    ''''''
+    def collapse_dict_values(in_dict: dict) -> str:
+        return [f"{str(res)}{chain}" for chain, reslist in in_dict.items() for res in list(reslist)]
+    
+    # split covalent_bonds string into its individual entries:
+    covalent_bonds = [x for x in covalent_bonds_str.split(",") if x]
+
+    # create residue mapping from motifs to change res_id
+    res_mapping = {old_id: new_id for old_id, new_id in zip(collapse_dict_values(template_motif), collapse_dict_values(motif))}
+
+    # replace res_id (resnum + chain) with res_id in new motif:
+    return ",".join([bond_str.replace((res_id := bond_str.split("_")[0]), res_mapping[res_id]) for bond_str in covalent_bonds])
+
 def mpnn_probs_fd(poses, motif_col:str):
     '''AAA'''
     # collect mpnn_probabilities from poses and write resfiles
@@ -298,7 +315,6 @@ def main(args):
     pdb_dir = f"{args.input_dir}/pdb_in/"
     ensembles = Poses(args.output_dir, glob(f"{pdb_dir}/*.pdb"))
     ensembles.max_rfdiffusion_gpus = args.max_rfdiffusion_gpus
-    plotdir = f"{ensembles.dir}/plots"
     plot_dir = ensembles.plot_dir
     keep_ligand_chain = check_for_params(args.input_dir, args.ligand_chain)
 
@@ -336,6 +352,7 @@ def main(args):
     # Update motif_res and fixedres to residue mapping after rfdiffusion 
     _ = [ensembles.update_motif_res_mapping(motif_col=col, inpaint_prefix="rfdiffusion") for col in motif_cols]
     _ = ensembles.update_res_identities(identity_col="catres_identities", inpaint_prefix="rfdiffusion")
+    ensembles.poses_df["covalent_bonds"] = [update_covalent_bonds_str(cov_bond_str, template_motif, motif) for cov_bond_str, template_motif, motif in zip(ensembles.poses_df["covalent_bonds"].to_list(), ensembles.poses_df["fixed_residues"].to_list(), ensembles.poses_df["motif_residues"].to_list())]
 
     # calculate ROG and contacts:
     ensembles.poses_df["rfdiffusion_rog"] = [metrics.calc_rog_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
@@ -344,7 +361,6 @@ def main(args):
 
     # Calculate RMSD and composite score:
     diffusion_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="rfdiffusion_template_bb_ca", remove_layers=1)
-    #diffusion_comp_score = ensembles.calc_composite_score("rfdiffusion_comp_score", ["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd"], [-1, args.rfdiffusion_rmsd_weight])
 
     # Copy and rewrite Fragments into output_dir/reference_fragments
     if not os.path.isdir((updated_ref_frags_dir := f"{ensembles.dir}/updated_reference_frags/")): os.makedirs(updated_ref_frags_dir)
@@ -355,9 +371,6 @@ def main(args):
     if keep_ligand_chain: 
         ligposes = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix="postdiffusion_lig_poses")
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="rfdiffusion", ligand_chain=args.ligand_chain)
-
-    # remove clashing structures:
-    #ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["rfdiffusion_ligand_clash"] == False]
 
     # filter based on rfdiffusion pLDDT (implement args.rfdiffusion_plddt_fraction):
     rfdiff_plddt_filter = ensembles.filter_poses_by_score(0.8, "rfdiffusion_plddt", prefix="rfdiffusion_plddt_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score"])
@@ -373,7 +386,7 @@ def main(args):
         cycle_prefix = f"cycle_{str(i)}"
 
         # run mpnn and fr
-        ensembles, index_layers, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, reference_location_col="updated_reference_frags_location")
+        ensembles, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", index_layers_to_reference=index_layers, fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, reference_location_col="updated_reference_frags_location")
 
         # plot
         fr_mpnn_rmsd_traj.add_and_plot(ensembles.poses_df[f"cycle_{str(i)}_fr_bb_ca_motif_rmsd"], f"cycle_{str(i)}")
@@ -384,16 +397,13 @@ def main(args):
     # superimpose poses on reference frags and calculate ligand scores:
     if keep_ligand_chain: calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="pre_esm", ligand_chain=args.ligand_chain)
 
-    # remove clashing poses:
-    #ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["pre_esm_ligand_clash"] == False]
-
     # filter down by total_score to max_esm_inputs:
     pre_mpnn_comp_score = ensembles.calc_composite_score("pre_esm_comp_score", [f"{cycle_prefix}_fr_total_score", f"pre_esm_pocket_score"], [1, -1])
     total_score_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, f"pre_esm_comp_score", prefix=f"pre_mpnn_filter", plot=["pre_esm_peratom_ligand_contacts", f"{cycle_prefix}_fr_total_score", f"{cycle_prefix}_fr_bb_ca_motif_rmsd", f"pre_esm_pocket_score"])
 
     ######################### ROUND1 ESMFold ###############################################
     # run mpnn and predict with ESMFold:
-    ensembles, index_layers = mpnn_design_and_esmfold(ensembles, prefix="round1", index_layers_to_reference=index_layers, num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_dir=fr_pdb_dir, ref_pdb_dir=pdb_dir)
+    ensembles = mpnn_design_and_esmfold(ensembles, prefix="round1", num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_col=f"{cycle_prefix}_fr_location", motif_ref_pdb_col="updated_reference_frags_location")
 
     # superimpose poses on reference frags and calculate ligand scores:
     if keep_ligand_chain: 
@@ -478,11 +488,11 @@ def main(args):
 
     ########################## FINAL MPNN SOLUBLE DESGIN ################################################################
     # write options and run Rosetta Refinement:
-    final_redesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_coordinate_constrained.xml -parser:script_vars substrate_chain={args.ligand_chain} -beta"
+    final_redesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_coordinate_constrained.xml -extra_res_fa {args.input_dir}/ligand/LG1.params -parser:script_vars substrate_chain={args.ligand_chain} -beta"
     final_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=5, prefix=f"final_fastrelax")
 
     # mpnn and esm:
-    ensembles, index_layers = mpnn_design_and_esmfold(ensembles, f"final_redesign", index_layers_to_reference=index_layers+1, num_mpnn_seqs=20, num_esm_inputs=8, num_esm_outputs_per_input_backbone=1, ref_pdb_dir=pdb_dir, bb_rmsd_dir=final_fr, mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
+    ensembles = mpnn_design_and_esmfold(ensembles, f"final_redesign", num_mpnn_seqs=20, num_esm_inputs=8, num_esm_outputs_per_input_backbone=1, motif_ref_pdb_col="updated_reference_frags_location", bb_rmsd_col="final_fastrelax_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
 
     # final backbone downsampling
     final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_comp_score", prefix=f"output_filter", remove_layers=2)
@@ -491,7 +501,6 @@ def main(args):
     lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"output_lig_poses")
 
     # write options and run Rosetta Refinement:
-    final_redesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_coordinate_constrained.xml -parser:script_vars substrate_chain={args.ligand_chain} -beta"
     output_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=1, prefix=f"output_fastrelax")
 
     # make new results, copy fragments and write alignment_script
