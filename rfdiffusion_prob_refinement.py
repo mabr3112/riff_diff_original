@@ -19,15 +19,14 @@ from utils.plotting import PlottingTrajectory
 import utils.metrics as metrics
 import superimposition_tools
 
-def fr_mpnn_esmfold(poses, prefix:str, n:int, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None) -> Poses:
+def fr_mpnn_esmfold(poses, prefix:str, n:int, index_layers_to_reference:int=0, fastrelax_pose_opts="fr_pose_opts", ref_pdb_dir:str=None, mpnn_fixedres_col:str=None) -> Poses:
     '''AAA'''
     # run fastrelax on predicted poses
     fr_opts = f"-beta -parser:protocol {args.refinement_protocol}"
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=n, prefix=f"{prefix}_refinement")
     
     # calculate RMSDs and filter
-    #rmsds = poses.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=poses.poses_df["template_motif"].to_list(), target_motif=poses.poses_df["motif_residues"].to_list(), metric_prefix=f"{prefix}_refinement_bb_ca", remove_layers=index_layers_to_reference+1)
-    rmsds = poses.calc_motif_bb_rmsd_df(ref_pdb=ref_pdb_col, ref_motif=ref_motif_col, target_motif="motif_residues", metric_prefix=f"{prefix}_refinement_bb_ca")
+    rmsds = poses.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=poses.poses_df["template_motif"].to_list(), target_motif=poses.poses_df["motif_residues"].to_list(), metric_prefix=f"{prefix}_refinement_bb_ca", remove_layers=index_layers_to_reference+1)
     fr_comp_score = poses.calc_composite_score(f"{prefix}_fr_comp_score", [f"{prefix}_refinement_total_score", f"{prefix}_refinement_bb_ca_motif_rmsd"], [1,1])
     fr_filter = poses.filter_poses_by_score(2, f"{prefix}_fr_comp_score", remove_layers=1, prefix=f"{prefix}_refinement_filter", plot=[f"{prefix}_refinement_total_score", f"{prefix}_refinement_bb_ca_motif_rmsd"])
 
@@ -77,7 +76,7 @@ def write_fastdesign_opts(row: pd.Series, cycle: int, reference_location_col:str
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
     return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.5 + cycle}"
 
-def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues"):
+def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, ref_pdb_dir:str=None, bb_rmsd_dir:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False):
     '''AAA'''
     # Run MPNN and filter (by half)
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues", use_soluble_model=use_soluble_model)
@@ -85,9 +84,9 @@ def mpnn_design_and_esmfold(poses, prefix:str, index_layers_to_reference:int=0, 
 
     # Run ESMFold and calc bb_ca_rmsd, motif_ca_rmsd and motif_heavy RMSD
     esm_preds = poses.predict_sequences(run_ESMFold, prefix=f"{prefix}_esm")
-    esm_bb_ca_rmsds = poses.calc_bb_rmsd_df(ref_pdb=bb_rmsd_col, metric_prefix=f"{prefix}_esm")
-    esm_motif_rmsds = poses.calc_motif_bb_rmsd_df(ref_pdb=motif_ref_pdb_col, ref_motif=ref_motif_col, target_motif=motif_col, metric_prefix=f"{prefix}_esm_bb_ca")
-    esm_motif_heavy_rmsds = poses.calc_motif_heavy_rmsd_df(ref_pdb=motif_ref_pdb_col, ref_motif=ref_catres_motif_col, target_motif=catres_motif_col, metric_prefix=f"{prefix}_esm_catres")
+    esm_bb_ca_rmsds = poses.calc_bb_rmsd_dir(ref_pdb_dir=bb_rmsd_dir, metric_prefix=f"{prefix}_esm", ref_chains=["A"], pose_chains=["A"], remove_layers=1)
+    esm_motif_rmsds = poses.calc_motif_bb_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=list(poses.poses_df["template_motif"]), target_motif=list(poses.poses_df["motif_residues"]), metric_prefix=f"{prefix}_esm_bb_ca", remove_layers=index_layers_to_reference+1)
+    esm_motif_heavy_rmsds = poses.calc_motif_heavy_rmsd_dir(ref_pdb_dir=ref_pdb_dir, ref_motif=poses.poses_df["template_fixedres"].to_list(), target_motif=poses.poses_df["fixed_residues"].to_list(), metric_prefix=f"{prefix}_esm_catres", remove_layers=index_layers_to_reference+1)
 
     # Filter Redesigns based on confidence and RMSDs
     esm_comp_score = poses.calc_composite_score(f"{prefix}_esm_comp_score", [f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_motif_rmsd"], [-1, rmsd_weight])
@@ -447,7 +446,7 @@ def main(args):
         ensembles.poses_df[f"{c_pref}_mpnn_fixed_residues"] = [get_design_residues(row, motif_res_col="motif_residues", cat_res_col="fixed_residues", lig_chain=args.ligand_chain) for index, row in ensembles.poses_df.iterrows()]
         ensembles.poses_df["fastdesign_opts"] = [write_fastdesign_opts(row, cycle=i, reference_location_col="updated_reference_frags_location", motif_res_col="motif_residues", cat_res_col="fixed_residues", designres_col=f"{c_pref}_mpnn_fixed_residues") for index, row in ensembles.poses_df.iterrows()]
         ensembles.poses_df["refinement_opts"] = ensembles.poses_df["fr_pose_opts"].str.replace(" -parser:script_vars ", f" -parser:script_vars sd={str(0.5 + i)} ")
-        ensembles, index_layers_n = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="fastdesign_opts", ref_pdb_col="updated_reference_frags_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues")
+        ensembles, index_layers_n = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, index_layers_to_reference=index_layers, fastrelax_pose_opts="fastdesign_opts", ref_pdb_dir=pdb_dir, mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues")
         
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
