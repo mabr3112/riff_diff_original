@@ -93,10 +93,10 @@ def extract_infos(chain, resnum):
     residues = [residue for residue in chain.get_residues()]
     Nterm = residues[0]
     Cterm = residues[-1]
-    origin = f'{chain.get_parent().get_parent().id}.pdb'
+    #origin = f'{chain.get_parent().get_parent().id}.pdb'
     chi_angles = extract_chi_angles(rotamer)
     frag_length = len([residue for residue in chain.get_residues()])
-    info = {'identity': rotamer.get_resname(), 'origin': origin, 'frag_num': chain.get_parent().id, 'res_num': resnum, 'chi1': chi_angles['chi1'], 'chi2': chi_angles['chi2'], 'chi3': chi_angles['chi3'], 'chi4': chi_angles['chi4'], 'frag_length': frag_length, 'bb_coords': {'Nterm': extract_backbone_coordinates(Nterm), 'Cterm': extract_backbone_coordinates(Cterm)}, 'rot_prob': rotamer['CA'].bfactor}
+    info = {'identity': rotamer.get_resname(), 'frag_num': chain.get_parent().id, 'res_num': resnum, 'chi1': chi_angles['chi1'], 'chi2': chi_angles['chi2'], 'chi3': chi_angles['chi3'], 'chi4': chi_angles['chi4'], 'frag_length': frag_length, 'bb_coords': {'Nterm': extract_backbone_coordinates(Nterm), 'Cterm': extract_backbone_coordinates(Cterm)}, 'rot_prob': rotamer['CA'].bfactor}
     return info
 
 def import_vdw_radii(database_dir):
@@ -133,12 +133,37 @@ def main(args):
     Checks if any combination contains clashes, and removes them.
     Writes the coordinates of N, CA, C of the central atom as well as the rotamer probability and other infos to a json file.
     '''
-    input_dir = utils.path_ends_with_slash(args.input_dir)
+    if not args.json_files and not args.json_prefix:
+        raise RuntimeError('Either --json_files or --json_prefix must be specified!')
+
+    #import json files
+    input_jsons = []
+    if args.json_files:
+        input_jsons += [os.path.abspath(json) for json in args.json_files]
+    if args.json_prefix:
+        json_prefix = os.path.abspath(args.json_prefix)
+        path, prefix = os.path.split(json_prefix)
+        for file in os.listdir(path):
+            if file.endswith('.json') and file.startswith(prefix):
+                input_jsons.append(os.path.join(path, file))
+
+    input_jsons = list(set(input_jsons))
+
+    #import pdbs
+    inputs = []
+    for file in input_jsons:
+        df = pd.read_json(file)
+        inputs.append(df)
+    in_df = pd.concat(inputs)
+
+    pdbs = [pdb for pdb, df in in_df.groupby('poses')]
+
+
     database = utils.path_ends_with_slash(args.database_dir)
 
     chains = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y']
 
-    structlist = utils.import_pdbs_from_dir(input_dir, args.pdb_prefix)
+    structlist = [utils.import_structure_from_pdb(file) for file in pdbs]
     if len(structlist) <= 1:
         raise RuntimeError('At least 2 structures needed!')
 
@@ -195,8 +220,18 @@ def main(args):
         if check == False:
             chain_dict = {}
             for chain in comb:
+                model = chain.get_parent()
+                struct = model.get_parent()
+                df = pd.DataFrame({'poses_description': struct.id, 'model_num': model.id}, index=[0])
+                df = df.merge(in_df, how='inner', on=['poses_description', 'model_num'])
+
                 rotamer_resnum = identify_rotamer_by_bfactor_probability(chain)
                 chain_dict[chain.id] = extract_infos(chain, rotamer_resnum)
+                chain_dict[chain.id]['origin'] = df['poses_description'].iat[0] + '.pdb'
+                if 'covalent_bond' in df.columns:
+                    chain_dict[chain.id]['covalent_bond'] = df['covalent_bond'].iat[0]
+
+                chain_dict[chain.id]['fragment_picking_info'] = df.drop(['model_num', 'rotamer_pos', 'poses_description', 'poses'], axis=1).to_dict(orient='records')[0]
             bb_dict[model_num] = chain_dict
             model_num = model_num + 1
 
@@ -205,7 +240,10 @@ def main(args):
     print(f'Deleted {count} clashing combinations.')
     print(f'Found {model_num} non-clashing combinations.')
 
-    filename = utils.create_output_dir_change_filename(args.output_dir, args.output_name)
+    path, file = os.path.split(args.output_name)
+    if not file.endswith('.json'):
+        file += '.json'
+    filename = utils.create_output_dir_change_filename(path, file)
 
     with open(filename, 'w') as out:
         json.dump(bb_dict, out)
@@ -220,10 +258,9 @@ if __name__ == "__main__":
 
     # mandatory input
     argparser.add_argument("--database_dir", type=str, required=True, help="Path to folder containing rotamer libraries, fragment library, etc.")
-    argparser.add_argument("--input_dir", type=str, required=True, help="Input directory")
-    argparser.add_argument("--pdb_prefix", type=str, required=True, help="Prefix for all pdb files that should be combined")
-    argparser.add_argument("--output_name", type=str, required=True, help="Output directory")
-    argparser.add_argument("--output_dir", type=str, required=True, help="Output filename")
+    argparser.add_argument("--json_prefix", type=str, default=None, nargs='?', help="Prefix for all json files that should be combined (including path, e.g. './output/mo6_'). Alternative to --json_files")
+    argparser.add_argument("--json_files", default=None, nargs='*', help="List of json files that contain fragment information. Alternative to --json_prefix.")
+    argparser.add_argument("--output_name", type=str, required=True, help="Path to output file. Directory will be created if it does not exist")
 
     # stuff you might want to adjust
     argparser.add_argument("--fragment_backbone_clash_detection_vdw_multiplier", type=float, default=1.5, help="Multiplier for VanderWaals radii for clash detection inbetween backbone fragments. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
