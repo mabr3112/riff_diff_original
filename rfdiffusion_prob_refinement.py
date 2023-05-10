@@ -531,15 +531,14 @@ if __name__ == "__main__":
     argparser.add_argument("--output_dir", type=str, required=True, help="output_directory")
     argparser.add_argument("--fastrelax_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/mpnn_fastdesign_substrate.xml", help="Protocol of fastrelax-MPNN cycles")
     argparser.add_argument("--refinement_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/fd_prob_refine.xml")
-    argparser.add_argument("--refinement_cycles", type=int, default=8, help="Number of Fastrelax-mpnn-esmfold refinement cycles to run.")
+    argparser.add_argument("--refinement_cycles", type=int, default=5, help="Number of Fastrelax-mpnn-esmfold refinement cycles to run.")
 
     # rfdiffusion options
     argparser.add_argument("--num_rfdiffusions", type=int, default=25, help="Number of rfdiffusion trajectories.")
     argparser.add_argument("--rfdiffusion_timesteps", type=int, default=50, help="Number of RFdiffusion timesteps to diffuse.")
-    argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=15, help="On how many GPUs at a time to you want to run Hallucination?")
+    argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=10, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
-    argparser.add_argument("--ROG_weight", type=int, default=4, help="Weight of monomer_ROG potential. Important for small porteins")
 
     # linkers
     argparser.add_argument("--flanking", type=str, default="cterm", help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
@@ -557,7 +556,7 @@ if __name__ == "__main__":
     argparser.add_argument("--output_scoreterms", type=str, default="esm_plddt,esm_bb_ca_motif_rmsd", help="Scoreterms to use to filter ESMFolded PDBs to the final output pdbs. IMPORTANT: if you supply scoreterms, also supply weights and always check the filter output plots in the plots/ directory!")
     argparser.add_argument("--output_scoreterm_weights", type=str, default="-1,1.5", help="Weights for how to combine the scoreterms listed in '--output_scoreterms'")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of your ligand chain.")
-    argparser.add_argument("--num_outputs", type=int, default=50, help="Number of .pdb-files you would like to have as output.")
+    argparser.add_argument("--num_outputs", type=int, default=20, help="Number of .pdb-files you would like to have as output.")
     argparser.add_argument("--filter_results_by_backbone", type=bool, default=True, help="Output only one structure per refinement input backbone.")
     args = argparser.parse_args()
 

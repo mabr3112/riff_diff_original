@@ -37,7 +37,7 @@
                         <CoordinateConstraintGenerator name="set_ca_motif_constraint" residue_selector="motif" native="true" ca_only="true" align_reference="true" />
 		</AddConstraints>
 		<AddConstraints name="add_bb_ca_cst" >
-                        <CoordinateConstraintGenerator name="set_bb_ca_constraint" residue_selector="motif" native="false" ca_only="true" />
+                        <CoordinateConstraintGenerator name="set_bb_ca_constraint" native="false" ca_only="true" />
 		</AddConstraints>
 		<AddConstraints name="add_cat_res_cst" >
 			<CoordinateConstraintGenerator name="set_cat_res_constraint" residue_selector="catres" native="true" sidechain="true" align_reference="true" />

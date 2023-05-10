@@ -63,12 +63,8 @@
 		<Add mover_name="pmm" />
 		<Add mover_name="fastdesign" />
 		<Add mover_name="pmm" />
-		Add mover_name="rm_bb_ca_cst" />
 		<Add mover_name="fastdesign" />
 		<Add mover_name="pmm" />
-		Add filter_name="packstat" />
-		Add filter_name="exposed_hydrophobics" />
-		Add filter_name="netcharge_total" />
 	</PROTOCOLS>
 	<OUTPUT scorefxn="beta" />
 </ROSETTASCRIPTS>
