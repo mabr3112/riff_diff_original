@@ -33,7 +33,7 @@ def identify_rotamer_by_bfactor_probability(entity):
     return resnum
 
 @lru_cache(maxsize=100000000)
-def distance_detection_LRU(entity1, entity2, bb_only:bool=True, ligand:bool=False, clash_detection_vdw_multiplier:float=1.0, database:str='database'):
+def distance_detection_LRU(entity1, entity2, bb_only:bool=True, ligand:bool=False, clash_detection_vdw_multiplier:float=1.0, database:str='database', resnum:int=None, covalent_bonds:str=None):
     '''
     checks for clashes by comparing VanderWaals radii. If clashes with ligand should be detected, set ligand to true. Ligand chain must be added as second entity.
     bb_only: only detect backbone clashes between to proteins or a protein and a ligand.
@@ -52,6 +52,11 @@ def distance_detection_LRU(entity1, entity2, bb_only:bool=True, ligand:bool=Fals
         entity1_atoms = (atom for atom in entity1.get_atoms())
         entity2_atoms = (atom for atom in entity2.get_atoms())
     for atom_combination in itertools.product(entity1_atoms, entity2_atoms):
+        #skip clash detection for covalent bonds
+        if resnum and covalent_bonds:
+            for cov_bond in covalent_bonds.split(','):
+                if atom_combination[0].get_parent().id[1] == resnum and atom_combination[0].name == cov_bond.split(':')[0] and atom_combination[1].name == cov_bond.split(':')[1]:
+                    continue
         distance = atom_combination[0] - atom_combination[1]
         element1 = atom_combination[0].element
         element2 = atom_combination[1].element
@@ -135,6 +140,13 @@ def main(args):
     '''
     if not args.json_files and not args.json_prefix:
         raise RuntimeError('Either --json_files or --json_prefix must be specified!')
+    
+    path, file = os.path.split(args.output_name)
+    if not file.endswith('.json'):
+        file += '.json'
+    filename = utils.create_output_dir_change_filename(path, file)
+    if os.path.exists(filename):
+        raise RuntimeError(f'Output file already exists at {filename}!')
 
     #import json files
     input_jsons = []
@@ -147,7 +159,7 @@ def main(args):
             if file.endswith('.json') and file.startswith(prefix):
                 input_jsons.append(os.path.join(path, file))
 
-    input_jsons = list(set(input_jsons))
+    input_jsons = sorted(list(set(input_jsons)))
 
     #import pdbs
     inputs = []
@@ -156,8 +168,17 @@ def main(args):
         inputs.append(df)
     in_df = pd.concat(inputs)
 
-    pdbs = [pdb for pdb, df in in_df.groupby('poses')]
-
+    pdbs = []
+    covalent_bonds = []
+    rotamer_positions = []
+    for pdb, df in in_df.groupby('poses'):
+        pdbs.append(pdb)
+        if 'covalent_bond' in df.columns:
+            df['covalent_bond'].replace(np.nan, None, inplace=True)
+        else:
+            df['covalent_bond'] = None
+        covalent_bonds.append(df['covalent_bond'].to_list())
+        rotamer_positions.append([int(pos) for pos in df['rotamer_pos'].to_list()])
 
     database = utils.path_ends_with_slash(args.database_dir)
 
@@ -169,20 +190,19 @@ def main(args):
 
     #delete all models that clash with the ligand
     if args.backbone_ligand_clash_detection_vdw_multiplier:
-        for struct in structlist:
+        for struct, cov_bond_list, rot_pos_list in zip(structlist, covalent_bonds, rotamer_positions):
             num_models = len([model for model in struct.get_models()])
             to_detach = []
-            for model in struct:
-                check = distance_detection_LRU(model['A'], model[args.ligand_chain], bb_only=True, ligand=True, clash_detection_vdw_multiplier=args.backbone_ligand_clash_detection_vdw_multiplier, database=database)
+            for model, cov_bond, resnum in zip(struct, cov_bond_list, rot_pos_list):
+                check = distance_detection_LRU(model['A'], model[args.ligand_chain], bb_only=True, ligand=True, clash_detection_vdw_multiplier=args.backbone_ligand_clash_detection_vdw_multiplier, database=database, resnum=resnum, covalent_bonds=cov_bond)
                 if args.rotamer_ligand_clash_detection_vdw_multiplier and check == False:
-                    resnum = identify_rotamer_by_bfactor_probability(model['A'])
-                    check = distance_detection_LRU(model['A'][resnum], model[args.ligand_chain], bb_only=False, ligand=True, clash_detection_vdw_multiplier=args.rotamer_ligand_clash_detection_vdw_multiplier, database=database)
+                    check = distance_detection_LRU(model['A'][resnum], model[args.ligand_chain], bb_only=False, ligand=True, clash_detection_vdw_multiplier=args.rotamer_ligand_clash_detection_vdw_multiplier, database=database, resnum=resnum, covalent_bonds=cov_bond)
                 if check == True:
                     to_detach.append(model.id)
 
 
             if len(to_detach) == len([model for model in struct.get_models()]):
-                raise RuntimeError(f'No model in {struct.id} found that does not clash with ligand!')
+                raise RuntimeError(f'No model in {struct.id} found that does not clash with ligand! Maybe set covalent bonds during fragment picking or decrease VdW_multiplier?')
             if len(to_detach) > 0:
                 for modelnum in to_detach:
                     struct.detach_child(modelnum)
@@ -204,12 +224,13 @@ def main(args):
     num_combs = 1
     for i in num_models:
         num_combs *= i
-    print(f'generating {num_combs} possible combinations...')
+    print(f'Generating {num_combs} possible combinations...')
     combinations = itertools.product(*toplist)
     #check for clashes between chains
     model_num = 0
     bb_dict = {}
     count = 0
+    print(f'Performing pairwise clash detection...')
     for comb in combinations:
         #pairwise check for clash
         for chain_pair in itertools.combinations(comb, 2):
@@ -224,12 +245,14 @@ def main(args):
                 struct = model.get_parent()
                 df = pd.DataFrame({'poses_description': struct.id, 'model_num': model.id}, index=[0])
                 df = df.merge(in_df, how='inner', on=['poses_description', 'model_num'])
-
                 rotamer_resnum = identify_rotamer_by_bfactor_probability(chain)
                 chain_dict[chain.id] = extract_infos(chain, rotamer_resnum)
                 chain_dict[chain.id]['origin'] = df['poses_description'].iat[0] + '.pdb'
                 if 'covalent_bond' in df.columns:
-                    chain_dict[chain.id]['covalent_bond'] = df['covalent_bond'].iat[0]
+                    if not df['covalent_bond'].isnull().values.any():
+                        chain_dict[chain.id]['covalent_bond'] = df['covalent_bond'].iat[0]
+                    else:
+                        df.drop('covalent_bond', inplace=True, axis=1)
 
                 chain_dict[chain.id]['fragment_picking_info'] = df.drop(['model_num', 'rotamer_pos', 'poses_description', 'poses'], axis=1).to_dict(orient='records')[0]
             bb_dict[model_num] = chain_dict
@@ -239,11 +262,6 @@ def main(args):
 
     print(f'Deleted {count} clashing combinations.')
     print(f'Found {model_num} non-clashing combinations.')
-
-    path, file = os.path.split(args.output_name)
-    if not file.endswith('.json'):
-        file += '.json'
-    filename = utils.create_output_dir_change_filename(path, file)
 
     with open(filename, 'w') as out:
         json.dump(bb_dict, out)
@@ -265,7 +283,7 @@ if __name__ == "__main__":
     # stuff you might want to adjust
     argparser.add_argument("--fragment_backbone_clash_detection_vdw_multiplier", type=float, default=1.5, help="Multiplier for VanderWaals radii for clash detection inbetween backbone fragments. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--backbone_ligand_clash_detection_vdw_multiplier", type=float, default=1.0, help="Multiplier for VanderWaals radii for clash detection between fragment backbones and ligand. Set None if no ligand is present. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
-    argparser.add_argument("--rotamer_ligand_clash_detection_vdw_multiplier", type=float, default=None, help="Multiplier for VanderWaals radii for clash detection between rotamer sidechain and ligand. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
+    argparser.add_argument("--rotamer_ligand_clash_detection_vdw_multiplier", type=float, default=0.8, help="Multiplier for VanderWaals radii for clash detection between rotamer sidechain and ligand. Clash is detected if distance_between_atoms < (VdW_radius_atom1 + VdW_radius_atom2)*multiplier")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Name of ligand chain.")
 
     args = argparser.parse_args()

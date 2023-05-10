@@ -1,7 +1,9 @@
 #!/home/tripp/anaconda3/envs/riffdiff/bin/python3.11
 
-#import logging
+import logging
 #logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from asyncio.sslproto import add_flowcontrol_defaults
+from distutils.command import clean
 import os
 import sys
 import copy
@@ -18,6 +20,17 @@ import numpy as np
 #sys.path.append("/home/tripp/riff_diff/")
 
 import utils.adrian_utils as utils
+
+def split_pdb_numbering(pdbnum):
+    resnum = ""
+    chain = ""
+    for char in pdbnum:
+        if char.isdigit():
+            resnum += char
+        else:
+            chain += char
+    resnum = int(resnum)
+    return [resnum, chain]
 
 def extract_backbone_angles(chain, resnum:int):
     '''
@@ -337,26 +350,24 @@ def rotamers_for_backbone(resnames, rotlib_path, phi, psi, rot_prob_cutoff:float
     else:
         return rotlib_list[0]
 
-def generate_backbones_for_residue(output_dir, output_prefix, theozyme, theozyme_residue, resnames, backbone, AA_alphabet, rotlib_path, backbone_angles, backbone_bondlengths, rotamer_fraction:float=None, rot_prob_cutoff:float=0.05, max_rotamers:int=70, max_stdev:float=2, level:int=3, frag_pos_to_replace:int=4, rot_on_bb_output:str=None, flip_symmetric:bool=True, flip_histidines:bool=False, his_central_atom:str="NE2"):
+def generate_backbones_for_residue(theozyme, theozyme_residue, resnames, backbone, AA_alphabet, rotlib_path, backbone_angles, backbone_bondlengths, rotamer_fraction:float=None, rot_prob_cutoff:float=0.05, max_rotamers:int=70, max_stdev:float=2, level:int=3, frag_pos_to_replace:int=4, rot_on_bb_output:str=None, flip_symmetric:bool=True, flip_histidines:bool=False, his_central_atom:str="NE2"):
 
     backbone = copy.deepcopy(backbone)
     AA_alphabet = copy.deepcopy(AA_alphabet)
     resnum = theozyme_residue.id[1]
+    logging.info(f"Identifying suitable rotamers for {resnames} with phi {backbone_angles['phi']}° and psi {backbone_angles['psi']}° that have probability higher than {rot_prob_cutoff}...")
     filtered_rotlib = rotamers_for_backbone(resnames, rotlib_path, backbone_angles["phi"], backbone_angles["psi"], rot_prob_cutoff, max_rotamers, max_stdev, level)
-    #display(filtered_rotlib)
-    filename = utils.create_output_dir_change_filename(output_dir, f'{output_prefix}{resnum}_{theozyme_residue.get_resname()}_filtered_rotlib.csv')
+    
     filtered_rotlib["rotamer_position"] = frag_pos_to_replace
     cols = filtered_rotlib.columns.tolist()
     cols = [cols[-1]] + cols[:-1]
     filtered_rotlib = filtered_rotlib[cols]
-    if os.path.exists(filename):
-        header = False
-    else:
-        header = True
-    filtered_rotlib.to_csv(filename, mode='a', header=header, index=False)
+
+    logging.info(f"Attaching rotamers to backbone fragment...")
     rot_on_bb = mutate_bb_res_to_theozyme_rotamer(backbone, AA_alphabet, frag_pos_to_replace, backbone_angles["phi"], backbone_angles["psi"], backbone_angles["omega"], backbone_angles["carb_angle"], backbone_angles["tau"], backbone_bondlengths["N_CA"], backbone_bondlengths["CA_C"], backbone_bondlengths["C_O"], filtered_rotlib, rot_on_bb_output)
     collect_rotamer_bbfs = Structure.Structure('rotbbfs')
     model_num = 0
+    logging.info(f"Aligning rotamers with theozyme...")
     for model in rot_on_bb.get_models():
         model.detach_parent()
         out = align_to_sidechain(model, model["A"][frag_pos_to_replace], theozyme_residue, False, False)
@@ -375,7 +386,7 @@ def generate_backbones_for_residue(output_dir, output_prefix, theozyme, theozyme
             flipped = align_to_sidechain(flipped, flipped["A"][frag_pos_to_replace], theozyme_residue, False, flip_histidines, his_central_atom)
             collect_rotamer_bbfs.add(flipped)
             model_num = model_num + 1
-    return collect_rotamer_bbfs
+    return collect_rotamer_bbfs, filtered_rotlib
 
 def AAs_up_to_chi1():
     AAs = ['CYS', 'SER', 'THR', 'VAL']
@@ -448,7 +459,25 @@ def generate_rotamer(AAalphabet_structure, residue_identity:str, res_id, phi:flo
                 for atom in res.get_atoms():
                     atom.bfactor = rot_probability * 100
             return res
+        
+def identify_rotamer_by_bfactor_probability(entity):
+    '''
+    returns the residue number where bfactor > 0, since this is where the rotamer probability was saved
+    '''
+    residue = None
+    for atom in entity.get_atoms():
+        if atom.bfactor > 0:
+            residue = atom.get_parent()
+            prob = atom.bfactor
+            break
+    if not residue:
+        raise RuntimeError('Could not find any rotamer in chain. Maybe rotamer probability was set to 0?')
+    return residue, prob
 
+def clean_input_backbone(entity):
+    for atom in entity.get_atoms():
+        atom.bfactor = 0
+    return entity
 
 def main(args):
     '''
@@ -463,49 +492,88 @@ def main(args):
     rot_prob_cutoff: filter rotamers based on probability. Might lead to very few rotamers!
     rot_on_bb_output: if provided a filename, write a pdbfile containing all rotamers on the provided backbone to filename
     '''
+    output_dir = utils.path_ends_with_slash(args.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}/{args.output_prefix}{args.theozyme_resnum}.txt")
+    logging.info(sys.argv)
+
+
+    logging.info(f"Importing database & input pdbs...")
     backbone = utils.import_structure_from_pdb(args.fragment_pdb)
+    backbone = clean_input_backbone(backbone)
     database_dir = utils.path_ends_with_slash(args.database_dir)
     AA_alphabet = utils.import_structure_from_pdb(f'{database_dir}AA_alphabet.pdb')
     theozyme = utils.import_structure_from_pdb(args.theozyme_pdb)
     output_dir = utils.path_ends_with_slash(args.output_dir)
 
-    if args.copy_ligand == True:
-        #check if ligand exists
+    if args.ligand_chain:
+    #check if ligand exists
         if not args.ligand_chain in [chain.id for chain in theozyme.get_chains()]:
-            raise RuntimeError(f'No ligand found in chain {args.ligand_chain}. Please make sure the theozyme pdb is correctly formatted. Available chains: {",".join([chain.id for chain in theozyme.get_chains()])}')
-        ligand = theozyme[0][args.ligand_chain]
+            raise RuntimeError(f'No ligand found in chain {args.ligand_chain}. Please make sure the theozyme pdb is correctly formatted.')
+        ligand = copy.deepcopy(theozyme[0][args.ligand_chain])
+        ligand.id = "Z"
+        logging.info(f"Found ligand in chain {args.ligand_chain}")
     else:
         ligand = None
 
-    if len(args.frag_pos_to_replace) > 1:
-        frag_pos_to_replace = [i for i in range(args.frag_pos_to_replace[0], args.frag_pos_to_replace[1]+1)]
-    else:
+    if len(args.frag_pos_to_replace) == 1:
         frag_pos_to_replace = args.frag_pos_to_replace
+    else:
+        frag_pos_to_replace = [i for i in range(args.frag_pos_to_replace[0], args.frag_pos_to_replace[1]+1)]
 
+    backbone_residues = [res.id[1] for res in backbone.get_residues()]
+    for pos in frag_pos_to_replace:
+        if not pos in backbone_residues:
+            raise ValueError(f'Positions for rotamer insertion {frag_pos_to_replace} do not match up with backbone fragment {backbone_residues}')
 
     model_num = 0
     output = Structure.Structure("out")
-    theozyme_residue = theozyme[0]['A'][args.theozyme_resnum]
+    resnum, chain = split_pdb_numbering(args.theozyme_resnum)
+    theozyme_residue = theozyme[0][chain][resnum]
 
     if args.add_equivalent_func_groups == True:
         rotamer_residues = identify_residues_with_equivalent_func_groups(theozyme_residue)
+        logging.info(f"Added residues with equivalent functional groups: {rotamer_residues}")
     else:
         rotamer_residues = [theozyme_residue.get_resname()]
 
+    filtered_rotlib_path = utils.create_output_dir_change_filename(output_dir, f'{args.output_prefix}{resnum}{chain}_{theozyme_residue.get_resname()}_filtered_rotlib.csv')
+
+    out_list = []
     for pos in frag_pos_to_replace:
+        logging.info(f"Extracting backbone fragment information...")
         backbone_angles = extract_backbone_angles(backbone[0]["A"], pos)
         backbone_bondlengths = extract_backbone_bondlengths(backbone[0]["A"], pos)
-        collect_rotamer_bbfs = generate_backbones_for_residue(output_dir, args.output_prefix, theozyme, theozyme_residue, rotamer_residues, backbone, AA_alphabet, database_dir, backbone_angles, backbone_bondlengths, None, args.rot_prob_cutoff, args.max_rotamers, args.max_stdev, args.level, pos, args.rot_on_bb_output, args.flip_symmetric, args.flip_histidines, args.his_central_atom)
+        logging.info(f"Attaching rotamers to backbone fragment...")
+        collect_rotamer_bbfs, filtered_rotlib = generate_backbones_for_residue(theozyme, theozyme_residue, rotamer_residues, backbone, AA_alphabet, database_dir, backbone_angles, backbone_bondlengths, None, args.rot_prob_cutoff, args.max_rotamers, args.max_stdev, args.level, pos, args.rot_on_bb_output, args.flip_symmetric, args.flip_histidines, args.his_central_atom)
+        
+        if os.path.exists(filtered_rotlib_path):
+            header = False
+        else:
+            header = True
+        filtered_rotlib.to_csv(filtered_rotlib_path, mode='a', header=header, index=False)
+        
         for model in collect_rotamer_bbfs:
+            rot, prob = identify_rotamer_by_bfactor_probability(model)
+            row = pd.Series({'model_num': str(model_num), 'rotamer_pos': str(pos), 'rotamer_probability': prob/100})
             model.id = model_num
             if ligand:
                 model.add(ligand)
+                row['ligand_chain'] = 'Z'
             output.add(model)
+            out_list.append(row)
             model_num = model_num + 1
-
+    logging.info(f"Writing rotamer backbone fragments to disk...")
+    
+    out_df = pd.DataFrame(out_list)
     filename = utils.create_output_dir_change_filename(output_dir, f'{args.output_prefix}{args.theozyme_resnum}_{theozyme_residue.get_resname()}.pdb')
+    out_df['poses'] = os.path.abspath(filename)
+    out_df['poses_description'] = f'{args.output_prefix}{args.theozyme_resnum}_{theozyme_residue.get_resname()}'
     utils.write_multimodel_structure_to_pdb(output, filename)
-
+    filename_json = utils.create_output_dir_change_filename(output_dir, args.output_prefix + f'{args.theozyme_resnum}_{theozyme_residue.get_resname()}.json')
+    out_df.to_json(filename_json)
+    logging.info(f"Done!")
     return
 
 
@@ -517,8 +585,8 @@ if __name__ == "__main__":
     # mandatory input
     argparser.add_argument("--fragment_pdb", type=str, required=True, help="Path to backbone fragment pdb")
     argparser.add_argument("--database_dir", type=str, default="/home/mabr3112/riff_diff/database/", help="Path to folder containing rotamer libraries, fragment library, etc.")
-    argparser.add_argument("--theozyme_pdb", type=str, required=True, help="Path to pdbfile containing theozyme, must contain all residues in chain A numbered from 1 to n, ligand must be in chain Z (if there is one).")
-    argparser.add_argument("--theozyme_resnum", type=int, required=True, help="Residue number in theozyme pdb to find fragments for.")
+    argparser.add_argument("--theozyme_pdb", type=str, required=True, help="Path to pdbfile containing theozyme")
+    argparser.add_argument("--theozyme_resnum", required=True, help="Residue number (e.g. 25A) in theozyme pdb to find rotamers for.")
     argparser.add_argument("--output_dir", type=str, required=True, help="Output directory")
     argparser.add_argument("--output_prefix", type=str, required=True, help="Prefix for all output files")
 
@@ -532,11 +600,11 @@ if __name__ == "__main__":
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of your ligand chain.")
 
     # stuff you probably don't want to touch
-    argparser.add_argument("--copy_ligand", type=bool, default=True, help="Copy ligand to output pdb (only works if ligand is present in theozyme chain Z!")
     argparser.add_argument("--flip_symmetric", type=bool, default=True, help="Flip tip symmetric residues (doubles number of fragments if set to true!")
     argparser.add_argument("--flip_histidines", type=bool, default=True, help="Flip the orientation of histidine residues to generate more fragment orientations (doubles number of fragments if set to true!")
     argparser.add_argument("--add_equivalent_func_groups", type=bool, default=True, help="use ASP/GLU, GLN/ASN and VAL/ILE interchangeably")
     argparser.add_argument("--rot_on_bb_output", type=str, default=None, help="Write fragments to disk before superpositioning with sidechain, mainly for testing purposes")
     args = argparser.parse_args()
+    #TODO: Add covalent bonds (make sure that it also works for equivalent func groups & tip symmetric residues!)
 
     main(args)

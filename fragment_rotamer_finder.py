@@ -30,6 +30,8 @@ def split_pdb_numbering(pdbnum):
         else:
             chain += char
     resnum = int(resnum)
+    if not chain:
+        chain = "A"
     return [resnum, chain]
 
 def tip_symmetric_residues():
@@ -435,7 +437,7 @@ def identify_fragments_by_phi_psi(AAalphabet, fraglib:pd.DataFrame(), rotlib:pd.
         out_frags = int(len([model for model in frag_dict[pos]['structure'].get_models()]))
         logging.info(f'Found {out_frags} of a maximum of {max_frags_per_pos} fragments for position {pos}')
         print(f'Found {out_frags} of a maximum of {max_frags_per_pos} fragments for position {pos}')
-        
+
         df_list = []
         for model, df in zip(frag_dict[pos]['structure'].get_models(), frag_dict[pos]['data'].groupby('frag_num', sort=False)):
             model.detach_parent()
@@ -724,6 +726,9 @@ def main(args):
         sec_dict = {}
         for i in sec_structs:
             sec, frac = i.split(':')
+            frac = float(frac)
+            if frac > 1 or frac < 0:
+                raise ValueError(f'Fraction for secondary structure {sec} must be a value between 0 and 1, but it is {frac}!')
             sec_dict[sec] = float(frac)
     else:
         sec_dict = None
@@ -782,6 +787,8 @@ def main(args):
         rot = identify_rotamer_position_by_probability(df)
         rotamer_resnum = int(rot['rotamer_pos'])
         row = pd.Series({'model_num': model_num, 'rotamer_pos': rotamer_resnum, 'AAs': df['AA'].to_list(), 'bb_score': df['bb_score'].to_list(), 'secondary_structure': df['ss'].to_list(), 'bfactor': df['bfactor'].to_list(), 'rotamer_probability': float(rot['probability']), 'pdb': rot['pdb']})
+        if args.covalent_bond:
+            row['covalent_bond'] = args.covalent_bond
         out_list.append(row)
         model.detach_parent()
         out = align_to_sidechain(model, model["A"][rotamer_resnum], theozyme_residue, False, False)
@@ -848,7 +855,7 @@ if __name__ == "__main__":
     argparser.add_argument("--frag_pos_to_replace", type=int, default=[2,4], nargs='+', help="Position in fragment the rotamer should be inserted, can either be int or a list containing first and last position (e.g. 2,6 if rotamer should be inserted at every position from 2 to 6). Recommended not to include N- and C-terminus!")
     argparser.add_argument("--fragsize", type=int, default=5, help="Size of output fragments.")
     argparser.add_argument("--rot_sec_struct", type=str, default=None, help="Limit fragments to secondary structure at rotamer position. Provide string of one-letter code of dssp secondary structure elements (B, E, G, H, I, T, S, -), e.g. 'HE' if rotamer should be in helices or beta strands.")
-    argparser.add_argument("--frag_sec_struct_fraction", type=str, default=None, help="Limit to fragments containing at least fraction of residues with the provided secondary structure. If fragment should have at least 50 percent helical residues OR 60 percent beta-sheet, pass 'H:50,E:60'")
+    argparser.add_argument("--frag_sec_struct_fraction", type=str, default=None, help="Limit to fragments containing at least fraction of residues with the provided secondary structure. If fragment should have at least 50 percent helical residues OR 60 percent beta-sheet, pass 'H:0.5,E:0.6'")
     argparser.add_argument("--max_frags", type=int, default=30, help="Maximum number of frags that should be returned.")
     argparser.add_argument("--rmsd_cutoff", type=float, default=1.0, help="Set minimum RMSD of output fragments. Increase to get more diverse fragments, but high values might lead to very long runtime!")
     argparser.add_argument("--score_cutoff", type=float, default=-0.5, help="Maximum mean backbone score of fragments (sum of omega, rama_prepro, hbond_sr_bb, p_aa_pp Rosetta scoreterms with ref15 weights)")
