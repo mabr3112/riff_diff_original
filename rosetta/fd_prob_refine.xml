@@ -50,6 +50,7 @@
 		<FastDesign name="fastdesign" scorefxn="beta_cst" task_operations="fd_no_design,mpnn_resprobs" />
 	</MOVERS>
 	<PROTOCOLS>
+		<Add mover_name="pmm" />
 		<Add mover_name="set_virtual_root" />
 		<Add mover_name="add_ca_motif_cst" />
 		<Add mover_name="add_bb_ca_cst" />
