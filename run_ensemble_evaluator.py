@@ -412,7 +412,7 @@ def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict
 
     # add ligand from last fragment, if option is set:
     if add_ligand:
-        lig = load_structure_from_pdbfile(f"{input_dir}/{fragment_dict['origin']}", all_models=True)[fragment_dict["frag_num"]][add_ligand]
+        lig = load_structure_from_pdbfile(add_ligand)
         lig.detach_parent()
         pose.add(lig)
 
@@ -913,9 +913,27 @@ def main(args):
     pdb_dir = f"{args.output_dir}/pdb_in/"
     if not os.path.isdir(pdb_dir): os.makedirs(pdb_dir, exist_ok=True)
 
+    # store Ligand in separate folder for hallucionation.
+    os.makedirs((lig_folder := f"{args.output_dir}/ligand/"), exist_ok=True)
+    x_pdb_path = glob(f"{input_dir}/*.pdb")[0]
+    x_pdb = load_structure_from_pdbfile(x_pdb_path)
+    ligand = x_pdb[args.ligand_chain]
+    ligand_pdbfile = utils.biopython_tools.store_pose(ligand, (lig_path:=f"{lig_folder}/LG1.pdb"))
+    substrate_name = [x for x in x_pdb[args.ligand_chain].get_residues()][0].get_resname()
+
+    # create Rosetta .params file if ligand contains more than 2 atoms. (Ligands with less atoms will not be considered explicitily for Rosetta Design!) (#TODO: create rotamer library too).
+    if len(list(ligand.get_atoms())) > 2:
+        # store ligand as .mol file for rosetta .molfile-to-params.py
+        logging.info(f"Running 'molfile_to_params.py' to generate params file for Rosetta.")
+        lig_molfile = convert_pdb_to_mol(lig_path)
+        run(f"python3 {script_dir}/rosetta/molfile_to_params.py -n {substrate_name} -p {lig_folder}/LG1 {lig_molfile} --keep-names --clobber --chain={args.ligand_chain}", shell=True, stdout=True, check=True, stderr=True)
+        lig_path = f"{lig_folder}/LG1_0001.pdb"
+    else:
+        logging.info(f"Ligand at {ligand_pdbfile} contains less than 3 atoms. No Rosetta Params file can be written for it.")
+
     # Store pdb-files of reassembled Fragments at <out_path>
     logging.info(f"Generating PDB-files for top {len(selected_path_df)} fragment ensembles at {pdb_dir}")
-    pdb_files = [assemble_pdb(selected_path_df.loc[index], out_path=pdb_dir, input_dir=input_dir, fragment_dict_dict=unique_fragments_dict, add_ligand=args.ligand_chain) for index in selected_path_df.index]
+    pdb_files = [assemble_pdb(selected_path_df.loc[index], out_path=pdb_dir, input_dir=input_dir, fragment_dict_dict=unique_fragments_dict, add_ligand=lig_path) for index in selected_path_df.index]
 
     # write contigs for inpainting
     inpaint_contigs_path = f"{args.output_dir}/inpaint_pose_opts.json" # output path to inpaint contigs file
@@ -937,22 +955,6 @@ def main(args):
     
     selected_path_df = selected_path_df.join([pd.DataFrame.from_dict(output_datadict)])
 
-    # store Ligand in separate folder for hallucionation.
-    os.makedirs((lig_folder := f"{args.output_dir}/ligand/"), exist_ok=True)
-    x_pdb_path = glob(f"{input_dir}/*.pdb")[0]
-    x_pdb = load_structure_from_pdbfile(x_pdb_path)
-    ligand = x_pdb[args.ligand_chain]
-    ligand_pdbfile = utils.biopython_tools.store_pose(ligand, (lig_path:=f"{lig_folder}/LG1.pdb"))
-    substrate_name = [x for x in x_pdb[args.ligand_chain].get_residues()][0].get_resname()
-
-    # create Rosetta .params file if ligand contains more than 2 atoms. (Ligands with less atoms will not be considered explicitily for Rosetta Design!) (#TODO: create rotamer library too).
-    if len(list(ligand.get_atoms())) > 2:
-        # store ligand as .mol file for rosetta .molfile-to-params.py
-        logging.info(f"Running 'molfile_to_params.py' to generate params file for Rosetta.")
-        lig_molfile = convert_pdb_to_mol(lig_path)
-        run(f"python3 {script_dir}/rosetta/molfile_to_params.py -n {substrate_name} -p {lig_folder}/LG1 {lig_molfile} --clobber --chain={args.ligand_chain}", shell=True, stdout=True, check=True, stderr=True)
-    else:
-        logging.info(f"Ligand at {ligand_pdbfile} contains less than 3 atoms. No Rosetta Params file can be written for it.")
 
     # store selected paths DataFrame
     scores_path = f"{args.output_dir}/selected_paths.json"
