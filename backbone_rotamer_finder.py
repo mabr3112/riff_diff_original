@@ -64,22 +64,14 @@ def extract_backbone_bondlengths(chain, resnum:int):
     C_O = round(chain[resnum].internal_coord.get_length("C:O"), 3)
     return {"N_CA": N_CA, "CA_C": CA_C, "C_O": C_O}
 
-def import_rotamer_library(library_path:str):
-    '''
-    reads in a Rosetta rotamer library, drops everything that is not needed
-    '''
-    library = pd.read_csv(library_path, skiprows=36, delim_whitespace=True, header=None)
-    library = library.drop(library.columns[[4, 5, 6, 7, 9]], axis=1)
-    library.columns = ["identity", "phi", "psi", "count", "probability", "chi1", "chi2", "chi3", "chi4", "chi1sig", "chi2sig", "chi3sig", "chi4sig"]
-    return library
-
 def return_residue_rotamer_library(library_folder:str, residue_identity:str):
     '''
     finds the correct library for a given amino acid and drops not needed chi angles
     '''
     library_folder = utils.path_ends_with_slash(library_folder)
     prefix = residue_identity.lower()
-    rotlib = import_rotamer_library(f'{library_folder}{prefix}.bbdep.rotamers.lib')
+    print(f'{library_folder}{prefix}.bbdep.rotamers.lib')
+    rotlib = pd.read_csv(f'{library_folder}{prefix}.bbdep.rotamers.lib')
     if residue_identity in AAs_up_to_chi3():
         rotlib.drop(['chi4', 'chi4sig'], axis=1, inplace=True)
     elif residue_identity in AAs_up_to_chi2():
@@ -107,7 +99,7 @@ def identify_rotamers_suitable_for_backbone(residue_identity:str, phi:float, psi
             rotlib = rotlib[rotlib['psi'] == psi].reset_index(drop=True)
         elif not psi:
             rotlib = rotlib[rotlib['phi'] == phi].reset_index(drop=True)
-        rotlib = rotlib.loc[rotlib['count'] >= 100]
+        rotlib = rotlib.loc[rotlib['phi_psi_occurence'] >= 1]
         rotlib = rotlib.drop_duplicates(subset=['phi', 'psi'], keep='first')
         rotlib.sort_values("probability", ascending=False)
         rotlib = rotlib.head(5)
@@ -338,7 +330,7 @@ def rotamers_for_backbone(resnames, rotlib_path, phi, psi, rot_prob_cutoff:float
     rotlib_list = []
     for res in resnames:
         if res in ["ALA", "GLY"]:
-            rotlib = pd.DataFrame([[res, phi, psi, float("nan"), 1]], columns=["identity", "phi", "psi", "count", "probability"])
+            rotlib = pd.DataFrame([[res, phi, psi, float("nan"), 1, float("nan")]], columns=["identity", "phi", "psi", "count", "probability", "phi_psi_occurence"])
             rotlib_list.append(rotlib)
         else:
             rotlib = return_residue_rotamer_library(rotlib_path, res)
