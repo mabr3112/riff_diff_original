@@ -57,7 +57,7 @@ def mpnn_fr(poses, prefix:str, fastrelax_pose_opts="fr_pose_opts", pdb_location_
 
     # calculate MPNN probabilities and write resfiles
     probs = poses.get_mpnn_probs(f"{prefix}_probs")
-    resfiles = poses.write_resfiles_from_mpnn_probs(colname=f"{prefix}_resfiles", probabilities_location_col=f"{prefix}_probs", motif_col=f"{prefix}_fd_motif", motif_chain="A")
+    resfiles = poses.write_resfiles_from_mpnn_probs(colname=f"{prefix}_resfiles", probabilities_location_col=f"{prefix}_probs", motif_col=f"{prefix}_fd_motif", motif_chain="A", motif_threshold=0.05)
     
     # write pose_opts (because sequence changes every time!!!)
     mpnn_col = f"{prefix}_mpnn_sequence"
@@ -376,12 +376,13 @@ def main(args):
 
     # filter based on ligand_contacts:
     rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.5, "rfdiffusion_pocket_score", prefix="rfdiffusion_pocket_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score"])
+
     ######################## MPNN-FASTDesign-MPNN #################################################
     # cycle MPNN and FastRelax:
     index_layers=1
     pdb_loc_col = "rfdiffusion_location"
     fr_mpnn_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/fr_mpnn_rmsd_trajectory.png", title="Motif BB-Ca\nTrajectory", dims=(0,3))
-    for i in range(3):
+    for i in range(10):
         cycle_prefix = f"cycle_{str(i)}"
 
         # run mpnn and fr
