@@ -304,7 +304,7 @@ def add_polyala_to_pose(pose: Bio.PDB.Structure.Structure, polyala_path:str, pol
     vector_polyala = ca2 - ca1
 
     # calculate rotation between vectors
-    R = PDB.rotmat(PDB.Vector(vector_polyala), PDB.Vector(vector_fragment))
+    R = Bio.PDB.rotmat(Bio.PDB.Vector(vector_polyala), Bio.PDB.Vector(vector_fragment))
 
     # rotate polyala and translate into motif
     polyala_rotated = apply_rotation_to_pose(polyala, ca1, R)
