@@ -412,7 +412,7 @@ def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict
 
     # add ligand from last fragment, if option is set:
     if add_ligand:
-        lig = load_structure_from_pdbfile(add_ligand)
+        lig = load_structure_from_pdbfile(add_ligand)[args.ligand_chain]
         lig.detach_parent()
         pose.add(lig)
 

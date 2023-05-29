@@ -53,10 +53,13 @@ def distance_detection_LRU(entity1, entity2, bb_only:bool=True, ligand:bool=Fals
         entity2_atoms = (atom for atom in entity2.get_atoms())
     for atom_combination in itertools.product(entity1_atoms, entity2_atoms):
         #skip clash detection for covalent bonds
+        covalent = False
         if resnum and covalent_bonds:
             for cov_bond in covalent_bonds.split(','):
                 if atom_combination[0].get_parent().id[1] == resnum and atom_combination[0].name == cov_bond.split(':')[0] and atom_combination[1].name == cov_bond.split(':')[1]:
-                    continue
+                    covalent = True
+        if covalent == True:
+            continue
         distance = atom_combination[0] - atom_combination[1]
         element1 = atom_combination[0].element
         element2 = atom_combination[1].element

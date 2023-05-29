@@ -44,7 +44,7 @@ def return_residue_rotamer_library(library_folder:str, residue_identity:str):
     '''
     library_folder = utils.path_ends_with_slash(library_folder)
     prefix = residue_identity.lower()
-    rotlib = import_rotamer_library(f'{library_folder}{prefix}.bbdep.rotamers.lib')
+    rotlib = pd.read_csv(f'{library_folder}{prefix}.bbdep.rotamers.lib')
     if residue_identity in AAs_up_to_chi3():
         rotlib.drop(['chi4', 'chi4sig'], axis=1, inplace=True)
     elif residue_identity in AAs_up_to_chi2():
@@ -69,16 +69,8 @@ def AAs_up_to_chi4():
     AAs = ['ARG', 'LYS']
     return AAs
 
-def import_rotamer_library(library_path:str):
-    '''
-    reads in a Rosetta rotamer library, drops everything that is not needed
-    '''
-    library = pd.read_csv(library_path, skiprows=36, delim_whitespace=True, header=None)
-    library = library.drop(library.columns[[4, 5, 6, 7, 9]], axis=1)
-    library.columns = ["identity", "phi", "psi", "count", "probability", "chi1", "chi2", "chi3", "chi4", "chi1sig", "chi2sig", "chi3sig", "chi4sig"]
-    return library
 
-def rama_plot(df, x, y, color_column, size_column, filename):
+def rama_plot_old(df, x, y, color_column, size_column, filename):
     '''
     plots phi and psi angles
     '''
@@ -93,7 +85,7 @@ def rama_plot(df, x, y, color_column, size_column, filename):
     # Set the size of dots according to the values in the size column
     data['norm_size'] = norm_size(data[size_column])
     size = data['norm_size'] * 30
-
+    plt.figure()
     plt.scatter(data[x], data[y], c=colors, s=size, marker=".")
 
     scalar_mappable = plt.cm.ScalarMappable(norm=norm_color, cmap=cmap)
@@ -109,7 +101,32 @@ def rama_plot(df, x, y, color_column, size_column, filename):
     plt.savefig(f'{filename}.png', dpi=300)
     plt.show()
 
-def identify_backbone_angles_suitable_for_rotamer(residue_identity:str, rotlib:pd.DataFrame(), output_prefix:str=None, output_dir:str=None, limit_sec_struct:str=None, count_cutoff:int=5, max_output:int=None, rotamer_diff_to_best=0.05):
+def rama_plot(df, x_col, y_col, color_col, size_col, save_path=None):
+    df_list = []
+    for phi_psi, df in df.groupby([x_col, y_col]):
+        top = df.sort_values(color_col, ascending=False).head(1)
+        df_list.append(top)
+    df = pd.concat(df_list)
+    df = df[df[size_col] > 0]
+    fig, ax = plt.subplots()
+    norm_color = plt.Normalize(0, df[color_col].max())
+    cmap = plt.cm.Blues
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm_color)
+    sm.set_array([])
+    norm_size = plt.Normalize(0, df[size_col].max())
+    ax.scatter(df[x_col], df[y_col], c=df[color_col], cmap=cmap, s=df[size_col], norm=norm_color)
+    fig.colorbar(sm, label="probability", ax=ax)
+    ax.set_xlabel("phi [degrees]")
+    ax.set_ylabel("psi [degrees]")
+    ax.set_xlim(-180, 180)
+    ax.set_ylim(-180, 180)
+    ax.set_xticks(np.arange(-180, 181, 60))
+    ax.set_yticks(np.arange(-180, 181, 60))
+    fig.gca().set_aspect('equal', adjustable='box')
+    if save_path:
+        plt.savefig(save_path, dpi=300)
+
+def identify_backbone_angles_suitable_for_rotamer(residue_identity:str, rotlib:pd.DataFrame(), output_prefix:str=None, output_dir:str=None, limit_sec_struct:str=None, occurence_cutoff:int=5, max_output:int=None, rotamer_diff_to_best=0.05):
     '''
     finds phi/psi angles most common for a given set of chi angles from a rotamer library
     chiX_bin multiplies the chiXsigma that is used to check if a rotamer fits to the given set of chi angles --> increasing leads to higher number of hits, decreasing leads to rotamers that more closely resemble input chis. Default=1
@@ -119,31 +136,31 @@ def identify_backbone_angles_suitable_for_rotamer(residue_identity:str, rotlib:p
     '''
 
     filename = utils.create_output_dir_change_filename(output_dir, output_prefix + f'{residue_identity}_rama_pre_filtering')
-    rama_plot(rotlib, 'phi', 'psi', 'probability', 'count', filename)
+    df_list = []
+
+    rama_plot(rotlib, 'phi', 'psi', 'probability', 'phi_psi_occurence', filename)
+
 
     if limit_sec_struct:
         rotlib = filter_rotamers_by_sec_struct(rotlib, limit_sec_struct)
 
-    if count_cutoff:
-        rotlib = rotlib.loc[rotlib['count'] > count_cutoff]
-
-    rotlib = rotlib.sort_values(["probability", "count"], ascending=False)
+    if occurence_cutoff:
+        rotlib = rotlib.loc[rotlib['phi_psi_occurence'] > occurence_cutoff]
 
     if rotamer_diff_to_best:
         rotlib = rotlib[rotlib['probability'] >= rotlib['probability'].max() * (1 - rotamer_diff_to_best)]
 
-    rotlib = rotlib.sort_values(["probability", "count"], ascending=False)
+    rotlib = rotlib.sort_values(["probability", "phi_psi_occurence"], ascending=False)
 
     if max_output:
         rotlib = rotlib.head(max_output)
     if rotlib.empty:
         raise RuntimeError('Could not find any rotamers that fit. Try setting different filter values!')
 
-
     rotlib.reset_index(drop=True, inplace=True)
 
     filename = utils.create_output_dir_change_filename(output_dir, output_prefix + f'{residue_identity}_rama_post_filtering')
-    rama_plot(rotlib, 'phi', 'psi', 'probability', 'count', filename)
+    rama_plot(rotlib, 'phi', 'psi', 'probability', 'phi_psi_occurence', filename)
 
     return rotlib
 
@@ -699,7 +716,7 @@ def atoms_for_func_group_alignment(residue):
 def main(args):
     output_dir = utils.path_ends_with_slash(args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}/{args.output_prefix}{args.theozyme_resnum}.txt")
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}fragment_picker_{args.output_prefix}{args.theozyme_resnum}.log")
     cmd = ''
     for key, value in vars(args).items():
         cmd += f'{key} {value}'
@@ -758,9 +775,9 @@ def main(args):
     rotlib = return_residue_rotamer_library(database, residue_identity)
     #filter rotamer library for most probable rotamers
     logging.info(f"Identifying most probable rotamers for residue {residue_identity}")
-    rotlib = identify_backbone_angles_suitable_for_rotamer(residue_identity, rotlib, args.output_prefix, output_dir, args.rot_sec_struct, args.phipsi_count_cutoff, args.max_phi_psis, args.rotamer_diff_to_best)
+    rotlib = identify_backbone_angles_suitable_for_rotamer(residue_identity, rotlib, f'{args.output_prefix}{args.theozyme_resnum}_', f'{output_dir}rotamer_info', args.rot_sec_struct, args.phipsi_occurence_cutoff, args.max_phi_psis, args.rotamer_diff_to_best)
     #write filtered rotamer library to disk
-    rotlibcsv = utils.create_output_dir_change_filename(output_dir, args.output_prefix + f'rotamers_{args.theozyme_resnum}_{residue_identity}.csv')
+    rotlibcsv = utils.create_output_dir_change_filename(f'{output_dir}rotamer_info', args.output_prefix + f'rotamers_{args.theozyme_resnum}_{residue_identity}.csv')
     rotlib.to_csv(rotlibcsv)
 
     #import fragment library
@@ -774,7 +791,7 @@ def main(args):
     logging.info(f"Looking for suitable fragments...")
     frags = identify_fragments_by_phi_psi(AA_alphabet, fraglib, rotlib, frag_pos_to_replace, args.fragsize, args.phi_psi_bin, max_fragments, args.rot_sec_struct, sec_dict, args.bfactor_cutoff, args.score_cutoff, args.rmsd_cutoff)
 
-    fragscsv = utils.create_output_dir_change_filename(output_dir, args.output_prefix + f'fragments_{args.theozyme_resnum}_{residue_identity}.csv')
+    fragscsv = utils.create_output_dir_change_filename(f'{output_dir}fragment_info', args.output_prefix + f'fragments_{args.theozyme_resnum}_{residue_identity}.csv')
     frags[0].to_csv(fragscsv)
 
     #align fragments to theozyme
@@ -799,6 +816,7 @@ def main(args):
             flipped = copy.deepcopy(out)
             row_flipped = copy.deepcopy(row)
             row_flipped['model_num'] = model_num
+            #TODO: adjust the covalent bond for flipped atoms
             out_list.append(row_flipped)
             flipped.id = model_num
             flipped = align_to_sidechain(flipped, flipped["A"][rotamer_resnum], theozyme_residue, args.flip_symmetric, False)
@@ -844,7 +862,7 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     # mandatory input
-    argparser.add_argument("--database_dir", type=str, default="/home/mabr3112/riff_diff/database/", help="Path to folder containing rotamer libraries, fragment library, etc.")
+    argparser.add_argument("--database_dir", type=str, default="/home/tripp/riffdiff2/riff_diff/database/", help="Path to folder containing rotamer libraries, fragment library, etc.")
     argparser.add_argument("--theozyme_pdb", type=str, required=True, help="Path to pdbfile containing theozyme, must contain all residues in chain A numbered from 1 to n, ligand must be in chain Z (if there is one).")
     argparser.add_argument("--theozyme_resnum", required=True, help="Residue number with chain information (e.g. 25A) in theozyme pdb to find fragments for.")
     argparser.add_argument("--output_dir", type=str, required=True, help="Output directory")
@@ -859,7 +877,7 @@ if __name__ == "__main__":
     argparser.add_argument("--max_frags", type=int, default=30, help="Maximum number of frags that should be returned.")
     argparser.add_argument("--rmsd_cutoff", type=float, default=1.0, help="Set minimum RMSD of output fragments. Increase to get more diverse fragments, but high values might lead to very long runtime!")
     argparser.add_argument("--score_cutoff", type=float, default=-0.5, help="Maximum mean backbone score of fragments (sum of omega, rama_prepro, hbond_sr_bb, p_aa_pp Rosetta scoreterms with ref15 weights)")
-    argparser.add_argument("--phipsi_count_cutoff", type=int, default=200, help="Limit how common the phi/psi combination of a certain rotamer has to be")
+    argparser.add_argument("--phipsi_occurence_cutoff", type=float, default=1, help="Limit how common the phi/psi combination of a certain rotamer has to be. Value is in %")
     argparser.add_argument("--covalent_bond", type=str, default=None, help="Add covalent bond(s) between rotamer and ligand in the form 'RotAtomA:LigAtomA,RotAtomB:LigAtomB'. Atom names should follow PDB numbering schemes, e.g. 'NZ:C3' for a covalent bond between a Lysine nitrogen and the third carbon atom of the ligand.")
 
 

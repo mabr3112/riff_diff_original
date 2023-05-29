@@ -187,7 +187,6 @@ def main(args):
     analysis.max_rosetta_cpus = args.max_cpus
     #merge pose dataframes
     analysis.poses_df = analysis.poses_df.drop(['input_poses', 'poses'], axis=1).merge(df, on='poses_description', how='left')
-    print(analysis.poses_df['updated_reference_frags_location'])
 
     analysis.poses_df = analysis.poses_df[analysis.poses_df["post_cm_ligand_clash"] == False]
     print(f'{len(analysis.poses_df.index)} input poses passed ligand clash filter.')
@@ -201,7 +200,7 @@ def main(args):
         #set filename for input pdbs
         pose_path = os.path.abspath(input_dir + row['poses_description'] + '.pdb')
         #add ligand to input pdbs
-        #si_tools.superimpose_add_chain_by_motif(row['updated_reference_frags_location'], row['poses'], args.ligand_chain, row['fixed_residues'], row['fixed_residues'], pose_path, ['CA', 'C', 'O'])
+        si_tools.superimpose_add_chain_by_motif(row['updated_reference_frags_location'], row['poses'], args.ligand_chain, row['fixed_residues'], row['fixed_residues'], pose_path, ['CA', 'C', 'O'])
         #identify catalytic residues, format them for rosettascripts input
         cat_res = chainresdict_to_str(row['fixed_residues'])
         motif_res = chainresdict_to_str(row['motif_residues'])
@@ -212,6 +211,12 @@ def main(args):
     #update path to input pdbs, add analysis options
     analysis.poses_df['analysis_options'] = options_list
     analysis.poses_df['poses'] = pose_list
+    #add LINK records if covalent bonds are present
+    print(analysis.poses_df.columns)
+    if 'covalent_bonds' in analysis.poses_df.columns:
+        print('Covalent bonds present! Adding LINK records to poses...')
+        analysis.add_LINK_to_poses('covalent_bonds', 'analysis')
+
 
     opts = f"-parser:protocol {xml}"
     if args.options:
@@ -250,7 +255,7 @@ def main(args):
     new_df = pd.DataFrame(row_list)
     analysis.poses_df = new_df.merge(old_poses.poses_df, on='poses_description')
 
-    print(analysis.poses_df['analysis_bb_ca_rmsd'])
+
 
     #TODO: filter dataframe --> only output best structures, otherwise it will get overwhelming
     #create plots
