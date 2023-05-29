@@ -378,7 +378,7 @@ def sample_from_path_df(df: pd.DataFrame, n: int, random_sample_subset_fraction:
     return sampled_df
 
 ######################### PDB-File Reassembly #####################################################
-def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict, input_dir: str, add_ligand=None):
+def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict, input_dir: str, add_ligand=None, add_channel:str=None):
     '''assembles pdb-files for input to either hallucination of RFdiffusion (recommended).
     Parameters:
         add_ligand, str:  name of the ligand chain. (e.g. Z, or X are most often Ligand Chains.)
@@ -415,6 +415,10 @@ def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict
         lig = load_structure_from_pdbfile(add_ligand)[args.ligand_chain]
         lig.detach_parent()
         pose.add(lig)
+        
+        # adding a channel only works if a ligand is present:
+        if add_channel:
+            pose = utils.biopython_tools.add_polyala_to_pose(pose, polyala_path=add_channel, polyala_chain="Q", ligand_chain=args.ligand_chain)
 
     # store the pose
     out_pdb_name = f"{out_path}/{path_series.name}.pdb"
@@ -913,7 +917,7 @@ def main(args):
     pdb_dir = f"{args.output_dir}/pdb_in/"
     if not os.path.isdir(pdb_dir): os.makedirs(pdb_dir, exist_ok=True)
 
-    # store Ligand in separate folder for hallucionation.
+    # store Ligand in separate folder for diffusion.
     os.makedirs((lig_folder := f"{args.output_dir}/ligand/"), exist_ok=True)
     x_pdb_path = glob(f"{input_dir}/*.pdb")[0]
     x_pdb = load_structure_from_pdbfile(x_pdb_path)
@@ -933,7 +937,7 @@ def main(args):
 
     # Store pdb-files of reassembled Fragments at <out_path>
     logging.info(f"Generating PDB-files for top {len(selected_path_df)} fragment ensembles at {pdb_dir}")
-    pdb_files = [assemble_pdb(selected_path_df.loc[index], out_path=pdb_dir, input_dir=input_dir, fragment_dict_dict=unique_fragments_dict, add_ligand=lig_path) for index in selected_path_df.index]
+    pdb_files = [assemble_pdb(selected_path_df.loc[index], out_path=pdb_dir, input_dir=input_dir, fragment_dict_dict=unique_fragments_dict, add_ligand=lig_path, add_channel=args.add_channel) for index in selected_path_df.index]
 
     # write contigs for inpainting
     inpaint_contigs_path = f"{args.output_dir}/inpaint_pose_opts.json" # output path to inpaint contigs file
@@ -974,8 +978,8 @@ if __name__ == "__main__":
     # PDB Options
     argparser.add_argument("--max_num", type=int, default=50, help="Number of pdb-files that will be created by pathsearch.")
     argparser.add_argument("--pdb_length", type=int, default=100, help="Maximum length of the pdb-files that will be inpainted.")
-    argparser.add_argument("--ligand_chain", type=str, default="Z", help="PDB letter for Ligand chain. The entire ligand chain will be used as a 'receptor' chain during hallucination.")
-    #argparser.add_argument("--add_ligand", type=str, default="Z", help="PDB Letter for ligand chain if you want to add the ligand to the input pdb-files")
+    argparser.add_argument("--ligand_chain", type=str, default="Z", help="PDB letter for Ligand chain. The ligand will be used as substrate during diffusion.")
+    argparser.add_argument("--add_channel", type=str, default="", help="If specified, adds the structure specified to the fragment to be used as a 'substrate channel' during diffusion.")
 
     # Filter Options
     argparser.add_argument("--max_linker_length", type=int, default=10, help="Maximum length of linkers that the fragments should be connected with.")

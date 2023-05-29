@@ -283,4 +283,96 @@ def select_motif_centroid_contacts(pose: Bio.PDB.Structure.Structure, motif:dict
 
     return motif_dict
 
+def add_polyala_to_pose(pose: Bio.PDB.Structure.Structure, polyala_path:str, polyala_chain:str="Q", ligand_chain:str="Z", ignore_atoms:"list[str]"=["H"]) -> Bio.PDB.Structure.Structure:
+    '''
+    
+    '''
+    # load polyala:
+    polyala = load_structure_from_pdbfile(polyala_path)
 
+    pa_atoms = [atom for atom in polyala.get_atoms() if atom.name not in ignore_atoms]
+    frag_protein_atoms, frag_ligand_atoms = get_protein_and_ligand_atoms(pose, ligand_chain=ligand_chain, ignore_atoms=ignore_atoms)
+
+    # calculate vector between fragment and ligand centroids
+    frag_protein_centroid = np.mean(frag_protein_atoms, axis=0)
+    frag_ligand_centroid = np.mean(frag_ligand_atoms, axis=0)
+    vector_fragment = frag_ligand_centroid - frag_protein_centroid
+
+    # calculate vector between CA of first and last residue of polyala
+    polyala_ca = [atom.get_coord() for atom in pa_atoms if atom.id == "CA"]
+    ca1, ca2 = polyala_ca[0], polyala_ca[-1]
+    vector_polyala = ca2 - ca1
+
+    # calculate rotation between vectors
+    R = Bio.PDB.rotmat(Bio.PDB.Vector(vector_polyala), Bio.PDB.Vector(vector_fragment))
+
+    # rotate polyala and translate into motif
+    polyala_rotated = apply_rotation_to_pose(polyala, ca1, R)
+    polyala_translated = apply_translation_to_pose(polyala_rotated, frag_ligand_centroid - ca1)
+
+    # change chain id of polyala and add into pose:
+    if polyala_chain in [chain.id for chain in pose.get_chains()]: raise KeyError(f"Chain {polyala_chain} already found in pose. Try other chain name!")
+    polyala_translated["A"].id = polyala_chain
+    pose.add(polyala_translated[polyala_chain])
+    return pose
+
+def get_protein_and_ligand_atoms(pose: Bio.PDB.Structure.Structure, ligand_chain, bb_atoms=["CA", "C", "N", "O"], ignore_atoms=["H"]) -> "tuple[list]":
+    '''AAA'''
+    if type(ligand_chain) == type("str"):
+        # get all CA coords of protein:
+        check_for_chain_in_pose(pose, ligand_chain)
+        protein_atoms = np.array([atom.get_coord() for atom in get_protein_atoms(pose, ligand_chain) if atom.id in bb_atoms])
+
+        # get Ligand Heavyatoms:
+        ligand_atoms = np.array([atom.get_coord() for atom in pose[ligand_chain].get_atoms() if atom.id not in ignore_atoms])
+
+    elif type(ligand_chain) == Bio.PDB.Chain.Chain:
+        # get all CA coords of protein:
+        protein_atoms = np.array([atom.get_coord() for atom in pose.get_atoms() if atom.id == "CA"])
+        
+        # get Ligand Heavyatoms:
+        ligand_atoms = np.array([atom.get_coord() for atom in ligand_chain.get_atoms() if atom.id not in ignore_atoms])
+    else: raise TypeError(f"Expected 'ligand' to be of type str or Bio.PDB.Chain.Chain, but got {type(ligand_chain)} instead.")
+    return protein_atoms, ligand_atoms
+
+def check_for_chain_in_pose(pose: Bio.PDB.Structure.Structure, chain:str):
+    '''Checking function'''
+    if chain in [x.id for x in pose.get_chains()]: return
+    else: raise KeyError(f"Chain {chain} not found in pose {pose.id}")
+
+def get_protein_atoms(pose: Bio.PDB.Structure.Structure, ligand_chain:str) -> list:
+        chains = [x.id for x in pose.get_chains()]
+        chains.remove(ligand_chain)
+        return [atom for chain in chains for atom in pose[chain].get_atoms()]
+
+def rotation_matrix_from_vectors(A, B):
+    A_normalized = A / np.linalg.norm(A)
+    B_normalized = B / np.linalg.norm(B)
+
+    R = np.cross(A_normalized, B_normalized)
+    cos_theta = np.dot(A_normalized, B_normalized)
+    sin_theta = np.sqrt(1 - cos_theta**2)
+
+    skew_symmetric = np.array([[0, -R[2], R[1]],
+                               [R[2], 0, -R[0]],
+                               [-R[1], R[0], 0]])
+
+    rotation_matrix = np.eye(3) + sin_theta * skew_symmetric + (1 - cos_theta) * np.dot(skew_symmetric, skew_symmetric)
+
+    return rotation_matrix
+
+def apply_rotation_to_pose(pose: Bio.PDB.Structure.Structure, origin: "list[float]", R: "list[list[float]]") -> Bio.PDB.Structure.Structure:
+    ''''''
+    for chain in pose:
+        for residue in chain:
+            for atom in residue:
+                atom.coord = np.dot(R, atom.coord - origin) + origin
+    return pose
+
+def apply_translation_to_pose(pose: Bio.PDB.Structure.Structure, vector: "list[float]") -> Bio.PDB.Structure.Structure:
+    ''''''
+    for chain in pose:
+        for residue in chain:
+            for atom in residue:
+                atom.coord += vector
+    return pose
