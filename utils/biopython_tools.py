@@ -290,6 +290,9 @@ def add_polyala_to_pose(pose: Bio.PDB.Structure.Structure, polyala_path:str, pol
     # load polyala:
     polyala = load_structure_from_pdbfile(polyala_path)
 
+    # determine polyala chain name (only first chain will be considered)
+    pa_chain = [x.id for x in polyala.get_chains()][0]
+
     pa_atoms = [atom for atom in polyala.get_atoms() if atom.name not in ignore_atoms]
     frag_protein_atoms, frag_ligand_atoms = get_protein_and_ligand_atoms(pose, ligand_chain=ligand_chain, ignore_atoms=ignore_atoms)
 
@@ -312,7 +315,7 @@ def add_polyala_to_pose(pose: Bio.PDB.Structure.Structure, polyala_path:str, pol
 
     # change chain id of polyala and add into pose:
     if polyala_chain in [chain.id for chain in pose.get_chains()]: raise KeyError(f"Chain {polyala_chain} already found in pose. Try other chain name!")
-    polyala_translated["A"].id = polyala_chain
+    if pa_chain != polyala_chain: polyala_translated[pa_chain].id = polyala_chain
     pose.add(polyala_translated[polyala_chain])
     return pose
 
