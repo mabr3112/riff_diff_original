@@ -547,7 +547,7 @@ def find_ligand_name(fragment, fragment_dict: dict, input_dir: str, ligand_chain
     frag_pose = load_structure_from_pdbfile(f"{input_dir}/{fragment_d['origin']}", all_models=True)[fragment_d["frag_num"]][ligand_chain]
     return [x for x in frag_pose.get_residues()][0].get_resname()
 
-def compile_rfdiffusion_pose_opts(input_series: pd.Series, fragment_dict: dict, input_dir: str, max_length=74, flanking="split", ligand_chain="Z"):
+def compile_rfdiffusion_pose_opts(input_series: pd.Series, fragment_dict: dict, input_dir: str, max_length=74, flanking="split", ligand_chain="Z", add_channel:str=None):
     '''Compile and write pose opts for RFdiffusion'''
     fragments = get_fragments(input_series)
     fragment_contigs = get_fragments_contigs(fragments, fragment_dict)
