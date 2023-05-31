@@ -340,11 +340,6 @@ def check_for_chain_in_pose(pose: Bio.PDB.Structure.Structure, chain:str):
     if chain in [x.id for x in pose.get_chains()]: return
     else: raise KeyError(f"Chain {chain} not found in pose {pose.id}")
 
-def get_protein_atoms(pose: Bio.PDB.Structure.Structure, ligand_chain:str) -> list:
-        chains = [x.id for x in pose.get_chains()]
-        chains.remove(ligand_chain)
-        return [atom for chain in chains for atom in pose[chain].get_atoms()]
-
 def rotation_matrix_from_vectors(A, B):
     A_normalized = A / np.linalg.norm(A)
     B_normalized = B / np.linalg.norm(B)
