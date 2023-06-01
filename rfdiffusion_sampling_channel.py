@@ -77,7 +77,7 @@ def collapse_dict_values(in_dict: dict) -> str:
 def write_fastdesign_opts(row: pd.Series, cycle: int, total_cycles: int, reference_location_col:str, designres_col: str, motif_res_col: str, cat_res_col: str, resfile_col: str) -> str:
     def collapse_dict_values(in_dict: dict) -> str:
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
-    return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.5} resfile={row[resfile_col]}"
+    return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.5 - (0.4 * cycle/total_cycles)} resfile={row[resfile_col]}"
 
 def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues"):
     '''AAA'''
@@ -348,9 +348,9 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:substrate_contacts_positive,weight:{args.pot_weight},pos_weight:{args.pos_weight}\\'] potentials.guide_decay={args.guide_decay}"
+    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:substrate_contacts_positive,weight:{args.pot_weight},pos_weight:{args.pos_weight},attr_dist:{args.attr_dist}\\'] potentials.guide_decay={args.guide_decay}"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
-    ensembles.poses_df["rfdiffusion_pose_opts"] = [x.replace("contigmap.contigs=[", "contigmap.contigs=[Q1-6/0 ") for x in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
+    ensembles.poses_df["rfdiffusion_pose_opts"] = [x.replace("contigmap.contigs=[", "contigmap.contigs=[Q5-16/0 ") for x in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
     ######################### RFDiffusion POSTPROCESSING #####################################################
@@ -550,9 +550,10 @@ if __name__ == "__main__":
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=10, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
-    argparser.add_argument("--pos_weight", type=float, default=10, help="Attractive substrate weight")
+    argparser.add_argument("--pos_weight", type=float, default=20, help="Attractive substrate weight")
     argparser.add_argument("--pot_weight", type=float, default=4, help="weight of the potential")
     argparser.add_argument("--guide_decay", type=str, default="quadratic", help="potential decay for RFdiffusion")
+    argparser.add_argument("--attr_dist", type=float, default=0, help="weight of the potential")
 
     # linkers
     argparser.add_argument("--flanking", type=str, default="split", help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
