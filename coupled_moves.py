@@ -340,9 +340,9 @@ def main(args):
     coupled_moves.poses_df = coupled_moves.poses_df.drop(['input_poses', 'poses'], axis=1).merge(df, on='poses_description', how='left')
 
     #identify last refinement cycle number
-    refinement_perresidue_plddt_columns = [column for column in coupled_moves.poses_df.columns if column.startswith('refinement_cycle_') and column.endswith('esm_perresidue_plddt')]
-
-    coupled_moves = filter_input_poses(coupled_moves, 'refinement_cycle_02_esm_perresidue_plddt', args.ligand_chain, args.sitescore_cutoff, args.max_input_per_backbone, input_dir)
+    refinement_perresidue_plddt_columns = sorted([column for column in coupled_moves.poses_df.columns if column.startswith('refinement_cycle_') and column.endswith('esm_perresidue_plddt')])
+    cycle_num = refinement_perresidue_plddt_columns[-1].split('_')
+    coupled_moves = filter_input_poses(coupled_moves, f'refinement_cycle_02_esm_perresidue_plddt', args.ligand_chain, args.sitescore_cutoff, args.max_input_per_backbone, input_dir)
 
 
     #create directory for input pdbs
