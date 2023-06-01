@@ -979,7 +979,7 @@ if __name__ == "__main__":
     argparser.add_argument("--max_num", type=int, default=50, help="Number of pdb-files that will be created by pathsearch.")
     argparser.add_argument("--pdb_length", type=int, default=100, help="Maximum length of the pdb-files that will be inpainted.")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="PDB letter for Ligand chain. The ligand will be used as substrate during diffusion.")
-    argparser.add_argument("--add_channel", type=str, default="", help="If specified, adds the structure specified to the fragment to be used as a 'substrate channel' during diffusion.")
+    argparser.add_argument("--add_channel", type=str, default="/home/mabr3112/riff_diff/utils/polygly_310.pdb", help="If specified, adds the structure specified to the fragment to be used as a 'substrate channel' during diffusion.")
 
     # Filter Options
     argparser.add_argument("--max_linker_length", type=int, default=10, help="Maximum length of linkers that the fragments should be connected with.")
