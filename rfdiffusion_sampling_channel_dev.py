@@ -18,6 +18,7 @@ import utils.pymol_tools
 from utils.plotting import PlottingTrajectory
 import utils.metrics as metrics
 import superimposition_tools
+from protocols import calculate_fastrelax_sidechain_rsmd
 
 def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None) -> Poses:
     '''AAA'''
@@ -498,16 +499,20 @@ def main(args):
         lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"final_redesign_lig_poses")
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_refinement", ligand_chain=args.ligand_chain)
 
+    # calculate average sidechain RMSD:
+    sc_rmsd_opts = "-parser:protocol /home/mabr3112/ -beta"
+    ensembles = calculate_fastrelax_sidechain_rmsd(ensembles, prefix="post_refinement_rmsdcheck", options=sc_rmsd_opts, pose_options="fastdesign_opts", sidechain_residues="fixed_residues", sidechain_ref_pdb_col="updated_reference_frags_location", n=15)
+
     # filter poses down by backbone:
     if args.filter_results_by_backbone: post_refinement_filter = ensembles.filter_poses_by_score(1, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_post_refinement_filter", remove_layers=filter_layers-2, plot=fst)
 
     ########################## FINAL MPNN SOLUBLE DESGIN ################################################################
     # write options and run Rosetta Refinement:
-    final_redesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_coordinate_constrained.xml -extra_res_fa {args.input_dir}/ligand/LG1.params -parser:script_vars substrate_chain={args.ligand_chain} -beta"
-    final_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=5, prefix=f"final_fastrelax")
+    #final_redesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_coordinate_constrained.xml -extra_res_fa {args.input_dir}/ligand/LG1.params -parser:script_vars substrate_chain={args.ligand_chain} -beta"
+    #final_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=5, prefix=f"final_fastrelax")
 
     # mpnn and esm:
-    ensembles = mpnn_design_and_esmfold(ensembles, f"final_redesign", num_mpnn_seqs=20, num_esm_inputs=8, num_esm_outputs_per_input_backbone=1, motif_ref_pdb_col="updated_reference_frags_location", bb_rmsd_col="final_fastrelax_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
+    ensembles = mpnn_design_and_esmfold(ensembles, f"final_redesign", num_mpnn_seqs=20, num_esm_inputs=8, num_esm_outputs_per_input_backbone=1, motif_ref_pdb_col="updated_reference_frags_location", bb_rmsd_col="post_refinement_rmsdcheck_fr_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
 
     # final backbone downsampling
     final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_comp_score", prefix=f"output_filter", remove_layers=2)
@@ -517,8 +522,8 @@ def main(args):
 
     # write options and run Rosetta Refinement, calculate sidechain RMSDs
     output_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=1, prefix=f"output_fastrelax")
-    #output_fr_motif_rmsd = ensembles.calc_motif_bb_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", metric_prefix=f"output_fr_bb_ca")
-    #output_fr_catres_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix=f"output_fr_catres")
+    output_fr_motif_rmsd = ensembles.calc_motif_bb_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", metric_prefix=f"output_fr_bb_ca")
+    output_fr_catres_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix=f"output_fr_catres")
 
     # final backbone downsampling
     #final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_comp_score", prefix=f"output_filter", remove_layers=2)
