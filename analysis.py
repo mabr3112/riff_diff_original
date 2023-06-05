@@ -214,8 +214,9 @@ def main(args):
     #add LINK records if covalent bonds are present
     print(analysis.poses_df.columns)
     if 'covalent_bonds' in analysis.poses_df.columns:
-        print('Covalent bonds present! Adding LINK records to poses...')
-        analysis.add_LINK_to_poses('covalent_bonds', 'analysis')
+        if not (analysis.poses_df['covalent_bonds'].str.strip() == "").any():
+            print('Covalent bonds present! Adding LINK records to poses...')
+            analysis.add_LINK_to_poses('covalent_bonds', 'analysis')
 
 
     opts = f"-parser:protocol {xml}"
@@ -270,7 +271,7 @@ def main(args):
 if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    argparser.add_argument("--protocol", type=str, required=True, help="path to xmlfile that should be used for analysis")
+    argparser.add_argument("--protocol", type=str, default='rosetta/analysis.xml', help="path to xmlfile that should be used for analysis")
     argparser.add_argument("--output_dir", type=str, required=True, help="working directory")
     argparser.add_argument("--max_cpus", type=int, default=320, help="maximum number of cpus for analysis")
     argparser.add_argument("--nstruct", type=int, default=50, help="analysis runs per input pdb")

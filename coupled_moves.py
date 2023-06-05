@@ -307,7 +307,7 @@ def filter_input_poses(poses, perresidue_plddt_column, ligand_chain, sitescore_c
         filtered_dfs = []
         for index, df in poses.poses_df.groupby('backbone_id', sort=False):
             df = df[df['pre_cm_site_score'] >= sitescore_cutoff]
-            df.sort_values('pre_cm_site_score', inplace=True, ascending=False)
+            df = df.sort_values('pre_cm_site_score', ascending=False)
             df = df.head(max_input_per_backbone)
             filtered_dfs.append(df)
 
@@ -339,7 +339,10 @@ def main(args):
     #merge pose dataframes
     coupled_moves.poses_df = coupled_moves.poses_df.drop(['input_poses', 'poses'], axis=1).merge(df, on='poses_description', how='left')
 
-    coupled_moves = filter_input_poses(coupled_moves, 'refinement_cycle_02_esm_perresidue_plddt', args.ligand_chain, args.sitescore_cutoff, args.max_input_per_backbone, input_dir)
+    #identify last refinement cycle number
+    refinement_perresidue_plddt_columns = sorted([column for column in coupled_moves.poses_df.columns if column.startswith('refinement_cycle_') and column.endswith('esm_perresidue_plddt')])
+    cycle_num = refinement_perresidue_plddt_columns[-1].split('_')
+    coupled_moves = filter_input_poses(coupled_moves, f'refinement_cycle_02_esm_perresidue_plddt', args.ligand_chain, args.sitescore_cutoff, args.max_input_per_backbone, input_dir)
 
 
     #create directory for input pdbs
@@ -363,6 +366,12 @@ def main(args):
     #update path to input pdbs, add coupled_moves options
     coupled_moves.poses_df['coupled_moves_options'] = options_list
     coupled_moves.poses_df['poses'] = pose_list
+
+    if 'covalent_bonds' in coupled_moves.poses_df.columns:
+        if not (coupled_moves.poses_df['covalent_bonds'].str.strip() == "").any():
+            print('Covalent bonds present! Adding LINK records to poses...')
+            coupled_moves.add_LINK_to_poses('covalent_bonds', 'coupled_moves')
+
 
     cm_opts = f"-parser:protocol {xml} -coupled_moves:ligand_mode true"
     if args.cm_options:
@@ -408,10 +417,10 @@ def main(args):
     cm_esm_results = [shutil.copy(esm_pose, esm_resultsdir) for esm_pose in coupled_moves.poses_df["poses"].to_list()]
 
     filtered_df = copy.deepcopy(coupled_moves.poses_df[coupled_moves.poses_df["post_cm_ligand_clash"] == False])
-    filtered_df['backbone_id'] = filtered_df['poses_description'].str[:-10]
+    filtered_df['backbone_id'] = filtered_df['poses_description'].str[:-5]
     filtered_dfs = []
     for index, df in filtered_df.groupby('backbone_id', sort=False):
-        df = df.sort_values('post_cm_site_score', ascending=False).head(10)
+        df = df.sort_values('post_cm_site_score', ascending=False).head(3)
         filtered_dfs.append(df)
     filtered_df = pd.concat(filtered_dfs)
     utils.pymol_tools.pymol_alignment_scriptwriter(df=filtered_df, scoreterm='post_cm_site_score', top_n=len(filtered_df.index), path_to_script=f'{esm_resultsdir}align.pml', ascending=False, pose_col='poses_description', ref_pose_col='input_poses', motif_res_col="motif_residues", fixed_res_col="fixed_residues", ref_motif_res_col="template_motif", ref_fixed_res_col="template_fixedres")
@@ -422,7 +431,7 @@ def main(args):
 if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    argparser.add_argument("--cm_protocol", type=str, required=True, help="path to xmlfile that should be used for coupled moves")
+    argparser.add_argument("--cm_protocol", type=str, default='rosetta/coupled_moves.xml', help="path to xmlfile that should be used for coupled moves")
     argparser.add_argument("--output_dir", type=str, required=True, help="working directory")
     argparser.add_argument("--cm_max_cpus", type=int, default=320, help="maximum number of cpus for coupled_moves")
     argparser.add_argument("--cm_nstruct", type=int, default=50, help="coupled_moves runs per input pdb")

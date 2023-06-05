@@ -54,7 +54,7 @@ def write_align_cmds(input_data: pd.Series, use_original_location=False):
     cmds.append(f"select temp_ref_res, {write_pymol_motif_selection(ref_pose_name, input_data['template_motif'])}")
 
     # superimpose inpaint_motif_residues:
-    cmds.append(f"super temp_ref_res, temp_motif_res")
+    cmds.append(f"cealign temp_ref_res, temp_motif_res")
 
     # select fixed residues, show sticks and color
     cmds.append(f"select temp_cat_res, {write_pymol_motif_selection(input_data['poses_description'], input_data['fixed_residues'])}")
@@ -96,7 +96,7 @@ def write_align_cmds_v2(input_data: pd.Series, pose_col="poses_description", ref
     cmds.append(f"select temp_ref_res, {write_pymol_motif_selection(ref_pose_name, input_data[ref_motif_res_col])}")
 
     # superimpose inpaint_motif_residues:
-    cmds.append(f"super temp_ref_res, temp_motif_res")
+    cmds.append(f"cealign temp_ref_res, temp_motif_res")
 
     # select fixed residues, show sticks and color
     cmds.append(f"select temp_cat_res, {write_pymol_motif_selection(input_data[pose_col], input_data[fixed_res_col])}")
