@@ -378,7 +378,7 @@ def sample_from_path_df(df: pd.DataFrame, n: int, random_sample_subset_fraction:
     return sampled_df
 
 ######################### PDB-File Reassembly #####################################################
-def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict, input_dir: str, add_ligand=None, add_channel:str=None):
+def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict, input_dir: str, add_ligand=None, add_channel:str=None, auto_superimpose_channel=True):
     '''assembles pdb-files for input to either hallucination of RFdiffusion (recommended).
     Parameters:
         add_ligand, str:  name of the ligand chain. (e.g. Z, or X are most often Ligand Chains.)
@@ -417,8 +417,10 @@ def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict
         pose.add(lig)
         
         # adding a channel only works if a ligand is present:
-        if add_channel:
+        if add_channel and auto_superimpose_channel:
             pose = utils.biopython_tools.add_polyala_to_pose(pose, polyala_path=add_channel, polyala_chain="Q", ligand_chain=args.ligand_chain)
+        elif add_channel:
+            pose.add(load_structure_from_pdbfile(add_channel)["Q"])
 
     # store the pose
     out_pdb_name = f"{out_path}/{path_series.name}.pdb"
@@ -937,7 +939,7 @@ def main(args):
 
     # Store pdb-files of reassembled Fragments at <out_path>
     logging.info(f"Generating PDB-files for top {len(selected_path_df)} fragment ensembles at {pdb_dir}")
-    pdb_files = [assemble_pdb(selected_path_df.loc[index], out_path=pdb_dir, input_dir=input_dir, fragment_dict_dict=unique_fragments_dict, add_ligand=lig_path, add_channel=args.add_channel) for index in selected_path_df.index]
+    pdb_files = [assemble_pdb(selected_path_df.loc[index], out_path=pdb_dir, input_dir=input_dir, fragment_dict_dict=unique_fragments_dict, add_ligand=lig_path, add_channel=args.add_channel, auto_superimpose_channel=args.auto_superimpose_channel) for index in selected_path_df.index]
 
     # write contigs for inpainting
     inpaint_contigs_path = f"{args.output_dir}/inpaint_pose_opts.json" # output path to inpaint contigs file
@@ -980,6 +982,7 @@ if __name__ == "__main__":
     argparser.add_argument("--pdb_length", type=int, default=100, help="Maximum length of the pdb-files that will be inpainted.")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="PDB letter for Ligand chain. The ligand will be used as substrate during diffusion.")
     argparser.add_argument("--add_channel", type=str, default="/home/mabr3112/riff_diff/utils/polygly_310.pdb", help="If specified, adds the structure specified to the fragment to be used as a 'substrate channel' during diffusion.")
+    argparser.add_argument("--auto_superimpose_channel", type=str, default=True, help="Set to false, if you want to copy the channel pdb-chain from the reference file without superimposing on moitf-substrate centroid axis.")
 
     # Filter Options
     argparser.add_argument("--max_linker_length", type=int, default=10, help="Maximum length of linkers that the fragments should be connected with.")
@@ -998,6 +1001,8 @@ if __name__ == "__main__":
     argparser.add_argument("--debug", default=None, help="Use Logging configuration DEBUG")
 
     args = argparser.parse_args()
+    if args.auto_superimpose_channel in ["false", "False", 0]: args.auto_superimpose_channel = False
+    print(args.auto_superimpose_channel)
 
     if args.sample_from_subset_fraction > 1: raise ValueError(f"random_sample_subset_fraction can only be value between 0 and 1!")
     main(args)
