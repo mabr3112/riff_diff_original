@@ -348,7 +348,7 @@ def main(args):
     ensembles.poses_df["template_fixedres"] = ensembles.poses_df["fixed_residues"]
 
     # RFdiffusion:
-    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:substrate_contacts_positive,weight:{args.pot_weight},pos_weight:{args.pos_weight},attr_dist:{args.attr_dist}\\'] potentials.guide_decay={args.guide_decay}"
+    diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:substrate_contacts_positive,weight:{args.pot_weight},pos_weight:{args.pos_weight},attr_dist:{args.attr_dist},decentralize:{args.decentralize}\\'] potentials.guide_decay={args.guide_decay}"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
     ensembles.poses_df["rfdiffusion_pose_opts"] = [x.replace("contigmap.contigs=[", "contigmap.contigs=[Q5-16/0 ") for x in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
@@ -554,6 +554,7 @@ if __name__ == "__main__":
     argparser.add_argument("--pot_weight", type=float, default=4, help="weight of the potential")
     argparser.add_argument("--guide_decay", type=str, default="quadratic", help="potential decay for RFdiffusion")
     argparser.add_argument("--attr_dist", type=float, default=0, help="weight of the potential")
+    argparser.add_argument("--decentralize", type=float, default=0, help="Set this value higher if you want your substrate more buried.")
 
     # linkers
     argparser.add_argument("--flanking", type=str, default="split", help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
