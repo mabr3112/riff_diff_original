@@ -515,8 +515,13 @@ def main(args):
     # add back the ligand
     lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"output_lig_poses")
 
-    # write options and run Rosetta Refinement:
+    # write options and run Rosetta Refinement, calculate sidechain RMSDs
     output_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=1, prefix=f"output_fastrelax")
+    output_fr_motif_rmsd = ensembles.calc_motif_bb_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", metric_prefix=f"output_fr_bb_ca")
+    output_fr_catres_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix=f"output_fr_catres")
+
+    # final backbone downsampling
+    #final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_comp_score", prefix=f"output_filter", remove_layers=2)
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
