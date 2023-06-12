@@ -386,6 +386,8 @@ def main(args):
     # filter based on ligand_contacts:
     rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.5, "rfdiffusion_pocket_score_v2", prefix="rfdiffusion_pocket_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
 
+    if args.diffuse_only.lower() == "true": sys.exit(1)
+
 
     ######################## MPNN-FASTDesign-MPNN #################################################
     # cycle MPNN and FastRelax:
@@ -548,6 +550,7 @@ if __name__ == "__main__":
     argparser.add_argument("--fastrelax_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/mpnn_fastdesign_substrate.xml", help="Protocol of fastrelax-MPNN cycles")
     argparser.add_argument("--refinement_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/fd_prob_refine_dev.xml")
     argparser.add_argument("--refinement_cycles", type=int, default=5, help="Number of Fastrelax-mpnn-esmfold refinement cycles to run.")
+    argparser.add_argument("--diffuse_only", type=str, default="False", help="Set to 'True' if you want to stop the protocol after rfdiffusion!")
 
     # rfdiffusion options
     argparser.add_argument("--num_rfdiffusions", type=int, default=10, help="Number of rfdiffusion trajectories.")
