@@ -558,7 +558,7 @@ if __name__ == "__main__":
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=10, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
-    argparser.add_argument("--pos_weight", type=float, default=20, help="Attractive substrate weight")
+    argparser.add_argument("--pos_weight", type=float, default=16, help="Attractive substrate weight")
     argparser.add_argument("--pot_weight", type=float, default=4, help="weight of the potential")
     argparser.add_argument("--guide_decay", type=str, default="quadratic", help="potential decay for RFdiffusion")
     argparser.add_argument("--attr_dist", type=float, default=0, help="weight of the potential")

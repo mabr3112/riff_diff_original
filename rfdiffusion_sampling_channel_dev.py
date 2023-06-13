@@ -20,7 +20,7 @@ import utils.metrics as metrics
 import superimposition_tools
 from protocols import calculate_fastrelax_sidechain_rsmd
 
-def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None) -> Poses:
+def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None, use_soluble_model:bool=False) -> Poses:
     '''AAA'''
     # run fastrelax on predicted poses
     fr_opts = f"-beta -parser:protocol {args.refinement_protocol} -extra_res_fa {args.input_dir}/ligand/LG1.params"
@@ -32,7 +32,7 @@ def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts"
     fr_filter = poses.filter_poses_by_score(2, f"{prefix}_fr_comp_score", remove_layers=1, prefix=f"{prefix}_refinement_filter", plot=[f"{prefix}_refinement_total_score", f"{prefix}_refinement_bb_ca_motif_rmsd"])
 
     # design and predict:
-    poses = mpnn_design_and_esmfold(poses, prefix=prefix, num_mpnn_seqs=48, num_esm_inputs=16, num_esm_outputs_per_input_backbone=5, motif_ref_pdb_col=ref_pdb_col, bb_rmsd_col=f"{prefix}_refinement_location", rmsd_weight=3, mpnn_fixedres_col=mpnn_fixedres_col)
+    poses = mpnn_design_and_esmfold(poses, prefix=prefix, num_mpnn_seqs=48, num_esm_inputs=16, num_esm_outputs_per_input_backbone=5, motif_ref_pdb_col=ref_pdb_col, bb_rmsd_col=f"{prefix}_refinement_location", rmsd_weight=3, mpnn_fixedres_col=mpnn_fixedres_col, use_soluble_model=use_soluble_model)
     return poses
 
 def mpnn_fr(poses, prefix:str, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, reference_location_col="input_poses"):
@@ -387,6 +387,7 @@ def main(args):
     # filter based on ligand_contacts:
     rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.5, "rfdiffusion_pocket_score_v2", prefix="rfdiffusion_pocket_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
 
+    if args.diffuse_only.lower() == "true": sys.exit(1)
 
     ######################## MPNN-FASTDesign-MPNN #################################################
     # cycle MPNN and FastRelax:
@@ -473,7 +474,7 @@ def main(args):
         # refine
         ensembles.poses_df["fastdesign_opts"] = [write_fastdesign_opts(row, cycle=i, total_cycles=args.refinement_cycles, reference_location_col="updated_reference_frags_location", motif_res_col="motif_residues", cat_res_col="fixed_residues", designres_col=f"{c_pref}_mpnn_fixed_residues", resfile_col=f"{c_pref}_resfiles") for index, row in ensembles.poses_df.iterrows()]
         #ensembles.poses_df["refinement_opts"] = ensembles.poses_df["fr_pose_opts"].str.replace(" -parser:script_vars ", f" -parser:script_vars sd={str(0.5 + i)} ")
-        ensembles = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, fastrelax_pose_opts="fastdesign_opts", ref_pdb_col="updated_reference_frags_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues")
+        ensembles = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, fastrelax_pose_opts="fastdesign_opts", ref_pdb_col="updated_reference_frags_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
         
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
@@ -492,6 +493,20 @@ def main(args):
         filter_layers = 3
         index_layers_to_remove = 3
         index_layers = idx+1
+    
+    ############################################ POST REFINEMENT WORKUP ############################################################
+    # repredict with AlphaFold2 and calculate RMSDs
+    af2_preds = ensembles.predict_sequences(run_AlphaFold2, options="--msa-mode single_sequence", prefix="af2")
+    af2_bb_ca_rmsd = ensembles.calc_bb_rmsd_df(ref_pdb=f"{c_pref}_refinement_location", metric_prefix="af2")
+    af2_motif_ca_rmsd = ensembles.calc_motif_bb_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", metric_prefix="af2_bb_ca")
+    af2_catres_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix="af2_catres")
+
+    # calculate average sidechain RMSD:
+    sc_rmsd_opts = "-parser:protocol /home/mabr3112/fastrelax_rmsdcheck.xml -beta"
+    ensembles = calculate_fastrelax_sidechain_rmsd(ensembles, prefix="post_refinement_rmsdcheck", options=sc_rmsd_opts, sidechain_residues="fixed_residues", sidechain_ref_pdb_col="updated_reference_frags_location", n=15)
+
+    # plot af2_stats:
+    
 
     # superimpose poses on reference frags and calculate ligand scores:
     if keep_ligand_chain: 
@@ -499,34 +514,12 @@ def main(args):
         lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"final_redesign_lig_poses")
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_refinement", ligand_chain=args.ligand_chain)
 
-    # calculate average sidechain RMSD:
-    sc_rmsd_opts = "-parser:protocol /home/mabr3112/ -beta"
-    ensembles = calculate_fastrelax_sidechain_rmsd(ensembles, prefix="post_refinement_rmsdcheck", options=sc_rmsd_opts, pose_options="fastdesign_opts", sidechain_residues="fixed_residues", sidechain_ref_pdb_col="updated_reference_frags_location", n=15)
-
-    # filter poses down by backbone:
-    if args.filter_results_by_backbone: post_refinement_filter = ensembles.filter_poses_by_score(1, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_post_refinement_filter", remove_layers=filter_layers-2, plot=fst)
-
-    ########################## FINAL MPNN SOLUBLE DESGIN ################################################################
-    # write options and run Rosetta Refinement:
-    #final_redesign_opts = f"-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_coordinate_constrained.xml -extra_res_fa {args.input_dir}/ligand/LG1.params -parser:script_vars substrate_chain={args.ligand_chain} -beta"
-    #final_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=5, prefix=f"final_fastrelax")
-
-    # mpnn and esm:
-    ensembles = mpnn_design_and_esmfold(ensembles, f"final_redesign", num_mpnn_seqs=20, num_esm_inputs=8, num_esm_outputs_per_input_backbone=1, motif_ref_pdb_col="updated_reference_frags_location", bb_rmsd_col="post_refinement_rmsdcheck_fr_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
+    # remove any structures that have an AF2 pLDDT below 85, Ca RMSD > 1
+    ensembles.poses_df = ensembles.poses_df[(ensembles.poses_df["af2_top_plddt"] <= 85) & (df["af2_bb_ca_rmsd"] <= 1) & (df["af2_bb_ca_motif_rmsd"] <= 1.5)]
 
     # final backbone downsampling
-    final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_comp_score", prefix=f"output_filter", remove_layers=2)
-
-    # add back the ligand
-    lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"output_lig_poses")
-
-    # write options and run Rosetta Refinement, calculate sidechain RMSDs
-    output_fr = ensembles.rosetta("rosetta_scripts.default.linuxgccrelease", options=final_redesign_opts, n=1, prefix=f"output_fastrelax")
-    output_fr_motif_rmsd = ensembles.calc_motif_bb_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", metric_prefix=f"output_fr_bb_ca")
-    output_fr_catres_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix=f"output_fr_catres")
-
-    # final backbone downsampling
-    #final_downsampling = ensembles.filter_poses_by_score(1, f"final_redesign_esm_comp_score", prefix=f"output_filter", remove_layers=2)
+    final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.5])
+    final_downsampling = ensembles.filter_poses_by_score(1, f"final_downsampling_comp_score", prefix=f"output_filter", remove_layers=2, plot=[f"final_downsampling_comp_score", f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "af2_bb_ca_rmsd", "af2_mean_plddt", "post_refinement_rmsdcheck_fr_sap_score"])
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
@@ -539,7 +532,7 @@ def main(args):
 
     # Write PyMol Alignment Script
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
-    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"{c_pref}_esm_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
+    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"final_downsampling_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
 
     print("done")
 
@@ -553,6 +546,7 @@ if __name__ == "__main__":
     argparser.add_argument("--fastrelax_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/mpnn_fastdesign_substrate.xml", help="Protocol of fastrelax-MPNN cycles")
     argparser.add_argument("--refinement_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/fd_prob_refine_dev.xml")
     argparser.add_argument("--refinement_cycles", type=int, default=5, help="Number of Fastrelax-mpnn-esmfold refinement cycles to run.")
+    argparser.add_argument("--diffuse_only", type=str, default="False", help="Set to 'True' if you want only to run RFdiffusion and no refinement!")
 
     # rfdiffusion options
     argparser.add_argument("--num_rfdiffusions", type=int, default=10, help="Number of rfdiffusion trajectories.")
@@ -560,11 +554,11 @@ if __name__ == "__main__":
     argparser.add_argument("--max_rfdiffusion_gpus", type=int, default=10, help="On how many GPUs at a time to you want to run Hallucination?")
     argparser.add_argument("--rfdiffusion_additional_options", type=str, default="", help="Any additional options that you want to parse to RFdiffusion.")
     argparser.add_argument("--rfdiff_guide_scale", type=int, default=5, help="Guide_scale value for RFDiffusion")
-    argparser.add_argument("--pos_weight", type=float, default=20, help="Attractive substrate weight")
+    argparser.add_argument("--pos_weight", type=float, default=16, help="Attractive substrate weight")
     argparser.add_argument("--pot_weight", type=float, default=4, help="weight of the potential")
     argparser.add_argument("--guide_decay", type=str, default="quadratic", help="potential decay for RFdiffusion")
     argparser.add_argument("--attr_dist", type=float, default=0, help="weight of the potential")
-    argparser.add_argument("--decentralize", type=float, default=0, help="Set this value higher if you want your substrate more buried.")
+    argparser.add_argument("--decentralize", type=float, default=2, help="Set this value higher if you want your substrate more buried.")
 
     # linkers
     argparser.add_argument("--flanking", type=str, default="split", help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")

@@ -14,6 +14,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
+import itertools
 
 
 # import custom modules
@@ -235,19 +236,18 @@ def check_for_chainbreaks(df, columname, fragsize):
     else:
         return False
 
-def filter_fragments(AAalphabet, frag_df:pd.DataFrame(), rmsd_cutoff:float=1.0, max_output:int=100, frag_sec_struct_fraction=None, bfactor_cutoff=None, score_cutoff=None):
+def filter_fragments(AAalphabet, theozyme_residue, rotamer_position, flip_symmetric, flip_histidines, his_central_atom, ligand, covalent_bond, database, frag_df:pd.DataFrame(), rmsd_cutoff:float=1.0, max_output:int=100, frag_sec_struct_fraction=None, bfactor_cutoff=None, score_cutoff=None):
     '''
     checks if fragments generated from dataframe pass filters until maximum number of output has been reached
     '''
     print('Filtering fragments...')
     logging.info('Filtering fragments...')
-    frag_num = 0
     filtered_frags = Structure.Structure("filtered_frags")
     rmsd_filtered_frag_df = pd.DataFrame()
 
     for fragment, df in frag_df.groupby('frag_num', sort=False):
         #check if maximum number of fragments for rotamer position have already been reached
-        if frag_num >= max_output:
+        if len([model for model in filtered_frags.get_models()]) >= max_output:
             break
 
         #filter for secondary structure content
@@ -271,32 +271,97 @@ def filter_fragments(AAalphabet, frag_df:pd.DataFrame(), rmsd_cutoff:float=1.0, 
                 #break since fragments are sorted by backbone score, if this fails all following will fail as well
                 break
 
-        if frag_num == 0:
-            frag_num = frag_num + 1
-            model = Model.Model(frag_num)
-            frag = create_fragment_from_df(df)
-            frag = attach_rotamer_to_fragments(df, frag, AAalphabet)
-            model.add(frag)
-            filtered_frags.add(model)
-            rmsd_filtered_frag_df = pd.concat([rmsd_filtered_frag_df, df])
         #check number of fragments in output dataframe, break if max_output is reached
-        else:
-            #check rmsd of current fragment against all fragments in the already filtered dataframe.
-            rmsdlist = []
-            frag = create_fragment_from_df(df)
-            for model in filtered_frags:
-                rmsd = calculate_rmsd_bb(model, frag)
-                rmsdlist.append(rmsd)
-            #if the lowest rmsd compared to all other fragments is higher than the set cutoff, add it to the filtered dataframe
-            if min(rmsdlist) >= rmsd_cutoff:
-                frag_num += 1
-                frag = attach_rotamer_to_fragments(df, frag, AAalphabet)
-                model = Model.Model(frag_num)
-                model.add(frag)
-                filtered_frags.add(model)
-                rmsd_filtered_frag_df = pd.concat([rmsd_filtered_frag_df, df])
+        #check rmsd of current fragment against all fragments in the already filtered dataframe.
+        frag = create_fragment_from_df(df)
+        frag = attach_rotamer_to_fragments(df, frag, AAalphabet)
+        frag = align_to_sidechain(frag, frag[rotamer_position], theozyme_residue, False, False)
+        filtered_frags, rmsd_filtered_frag_df = check_fragment(frag, filtered_frags, df, rmsd_filtered_frag_df, ligand, database, rotamer_position, covalent_bond, rmsd_cutoff)
+        if ((flip_symmetric == True and theozyme_residue.get_resname() in tip_symmetric_residues()) or (flip_histidines == True and theozyme_residue.get_resname() == "HIS")) and len([model for model in filtered_frags.get_models()]) < max_output:
+            flipped_frag = copy.deepcopy(frag)
+            flipped_frag = align_to_sidechain(flipped_frag, flipped_frag[rotamer_position], theozyme_residue, True, True, his_central_atom, ligand)
+            filtered_frags, rmsd_filtered_frag_df = check_fragment(flipped_frag, filtered_frags, df, rmsd_filtered_frag_df, ligand, database, rotamer_position, covalent_bond, rmsd_cutoff)
 
     return {'data': rmsd_filtered_frag_df, 'structure': filtered_frags}
+
+def add_frag_to_structure(frag, structure):
+    frag_num = len([model for model in structure.get_models()])
+    model = Model.Model(frag_num)
+    model.add(frag)
+    structure.add(model)
+
+def check_fragment(frag, structure, frag_df, rmsd_filtered_frag_df, ligand, database, rotamer_position, covalent_bond, rmsd_cutoff):
+    frag_df['frag_num'] = len([model for model in structure.get_models()]) + 1
+    if ligand:
+        #check for backbone clashes
+        clash_check = distance_detection(frag, ligand, True, True, 1.2, database, rotamer_position, covalent_bond)
+        if clash_check == False:
+            #check for rotamer clashes
+            clash_check = distance_detection(frag[rotamer_position], ligand, False, True, 0.8, database, rotamer_position, covalent_bond)
+    else:
+        clash_check = False
+    #add the first encountered fragment without rmsd checking
+    if len([model for model in structure.get_models()]) == 0 and clash_check == False:
+        add_frag_to_structure(frag, structure)
+        rmsd_filtered_frag_df = pd.concat([rmsd_filtered_frag_df, frag_df])
+        return structure, rmsd_filtered_frag_df
+    #calculate rmsds for all already accepted fragments
+    if len([model for model in structure.get_models()]) > 0 and clash_check == False:
+        rmsdlist = [calculate_rmsd_bb(model, frag) for model in structure.get_models()]
+        #if the lowest rmsd compared to all other fragments is higher than the set cutoff, add it to the filtered dataframe
+        if min(rmsdlist) >= rmsd_cutoff:
+            add_frag_to_structure(frag, structure)
+            rmsd_filtered_frag_df = pd.concat([rmsd_filtered_frag_df, frag_df])
+
+    return structure, rmsd_filtered_frag_df
+
+def import_vdw_radii(database_dir):
+    '''
+    from https://en.wikipedia.org/wiki/Atomic_radii_of_the_elements_(data_page), accessed 30.1.2023
+    '''
+    vdw_radii = pd.read_csv(f'{database_dir}/vdw_radii.csv')
+    vdw_radii.drop(['name', 'atomic_number', 'empirical', 'Calculated', 'Covalent(sb)', 'Covalent(tb)', 'Metallic'], axis=1, inplace=True)
+    vdw_radii.dropna(subset=['VdW_radius'], inplace=True)
+    vdw_radii['VdW_radius'] = vdw_radii['VdW_radius'] / 100
+    vdw_radii = vdw_radii.set_index('element')['VdW_radius'].to_dict()
+    return vdw_radii
+
+def distance_detection(entity1, entity2, bb_only:bool=True, ligand:bool=False, clash_detection_vdw_multiplier:float=1.0, database:str='database', resnum:int=None, covalent_bonds:str=None):
+    '''
+    checks for clashes by comparing VanderWaals radii. If clashes with ligand should be detected, set ligand to true. Ligand chain must be added as second entity.
+    bb_only: only detect backbone clashes between to proteins or a protein and a ligand.
+    clash_detection_vdw_multiplier: multiply Van der Waals radii with this value to set clash detection limits higher/lower
+    database: path to database directory
+    '''
+    backbone_atoms = ['CA', 'C', 'N', 'O', 'H']
+    vdw_radii = import_vdw_radii(database)
+    if bb_only == True and ligand == False:
+        entity1_atoms = (atom for atom in entity1.get_atoms() if atom.name in backbone_atoms)
+        entity2_atoms = (atom for atom in entity2.get_atoms() if atom.name in backbone_atoms)
+    elif bb_only == True and ligand == True:
+        entity1_atoms = (atom for atom in entity1.get_atoms() if atom.name in backbone_atoms)
+        entity2_atoms = (atom for atom in entity2.get_atoms())
+    else:
+        entity1_atoms = (atom for atom in entity1.get_atoms())
+        entity2_atoms = (atom for atom in entity2.get_atoms())
+
+    for atom_combination in itertools.product(entity1_atoms, entity2_atoms):
+        #skip clash detection for covalent bonds
+        covalent = False
+        if resnum and covalent_bonds:
+            for cov_bond in covalent_bonds.split(','):
+                if atom_combination[0].get_parent().id[1] == resnum and atom_combination[0].name == cov_bond.split(':')[0] and atom_combination[1].name == cov_bond.split(':')[1]:
+                    covalent = True
+        if covalent == True:
+            continue
+        distance = atom_combination[0] - atom_combination[1]
+        element1 = atom_combination[0].element
+        element2 = atom_combination[1].element
+        clash_detection_limit = clash_detection_vdw_multiplier * (vdw_radii[str(element1)] + vdw_radii[str(element2)])
+        if distance < clash_detection_limit:
+            return True
+    return False
+
 
 def sort_frags_df_by_score(fragment_df):
     score_df_list = []
@@ -319,16 +384,15 @@ def sort_frags_df_by_score(fragment_df):
 
 def calculate_rmsd_bb(entity1, entity2):
     '''
-    calculates rmsd of 2 structures considering backbone heavy atoms
+    calculates rmsd of 2 structures considering backbone heavy atoms. does no superposition!
     '''
     sup = Superimposer()
     bb_atoms = ["N", "CA", "C", "O"]
     entity1_atoms = [atom for atom in entity1.get_atoms() if atom.id in bb_atoms]
     entity2_atoms = [atom for atom in entity2.get_atoms() if atom.id in bb_atoms]
 
-    sup.set_atoms(entity1_atoms, entity2_atoms)
-    sup.rotran
-    rmsd = round(sup.rms, 2)
+    rmsd = math.sqrt(sum([(atom1 - atom2) ** 2 for atom1, atom2 in zip(entity1_atoms, entity2_atoms)]) / len(entity1_atoms))
+
     return rmsd
 
 def create_fragment_from_df(df:pd.DataFrame()):
@@ -352,7 +416,7 @@ def create_fragment_from_df(df:pd.DataFrame()):
 
     return chain
 
-def identify_positions_for_rotamer_insertion(fraglib, rotlib, rot_sec_struct, phi_psi_binsize):
+def identify_positions_for_rotamer_insertion(fraglib, rotlib, rot_sec_struct, phi_psi_binsize, limit_frags_to_chi, limit_frags_to_res_id):
 
     phi_psi_binsize = phi_psi_binsize / 2
     #convert string to list
@@ -364,17 +428,22 @@ def identify_positions_for_rotamer_insertion(fraglib, rotlib, rot_sec_struct, ph
     columns = list(rotlib.columns)
     for angle in [column for column in columns if column in angles]:
         rotlib.loc[rotlib[angle] < 0, angle] += 360
-
     rotamer_positions_list = []
     for index, row in rotlib.iterrows():
         #filter based on difference & amino acid identity
+        rotamer_positions = fraglib.loc[(np.minimum(abs(fraglib['phi'] - row['phi']), abs(fraglib['phi'] - row['phi'] + 360)) <= phi_psi_binsize) & (np.minimum(abs(fraglib['psi'] - row['psi']), abs(fraglib['psi'] - row['psi'] + 360)) <= phi_psi_binsize)]
+        if limit_frags_to_res_id == True:
+            rotamer_positions = rotamer_positions.loc[fraglib['AA'] == row['identity']]
+        if rotamer_positions.empty:
+            continue
         if rot_sec_struct:
-            rotamer_positions = fraglib.loc[(np.minimum(abs(fraglib['phi'] - row['phi']), abs(fraglib['phi'] - row['phi'] + 360)) <= phi_psi_binsize) & (np.minimum(abs(fraglib['psi'] - row['psi']), abs(fraglib['psi'] - row['psi'] + 360)) <= phi_psi_binsize) & (fraglib['AA'] == row['identity']) & (fraglib['ss'].isin(rot_sec_struct))]
-        else:
-            rotamer_positions = fraglib.loc[(np.minimum(abs(fraglib['phi'] - row['phi']), abs(fraglib['phi'] - row['phi'] + 360)) <= phi_psi_binsize) & (np.minimum(abs(fraglib['psi'] - row['psi']), abs(fraglib['psi'] - row['psi'] + 360)) <= phi_psi_binsize) & (fraglib['AA'] == row['identity'])]
+            rotamer_positions = rotamer_positions.loc[fraglib['ss'].isin(rot_sec_struct)]
+        if rotamer_positions.empty:
+            continue
         for chi in [column for column in columns if column in ['chi1', 'chi2', 'chi3', 'chi4']]:
-            #filter for positions that have chi angles within 1 stdev from input chis
-            rotamer_positions = rotamer_positions.loc[(np.minimum(abs(rotamer_positions[chi] - row[chi]), abs(rotamer_positions[chi] - row[chi] + 360)) < 2 * row[f'{chi}sig'])]
+            if limit_frags_to_chi == True:
+                #filter for positions that have chi angles within 2 stdev from input chis
+                rotamer_positions = rotamer_positions.loc[(np.minimum(abs(rotamer_positions[chi] - row[chi]), abs(rotamer_positions[chi] - row[chi] + 360)) < 2 * row[f'{chi}sig'])]
             #change chi angles to mean value from bin
             rotamer_positions[chi] = row[chi]
 
@@ -387,7 +456,7 @@ def identify_positions_for_rotamer_insertion(fraglib, rotlib, rot_sec_struct, ph
         rotamer_positions = pd.concat(rotamer_positions_list)
     return rotamer_positions
 
-def identify_fragments_by_phi_psi(AAalphabet, fraglib:pd.DataFrame(), rotlib:pd.DataFrame(), frag_pos_to_replace=4, fragsize:int=7, phi_psi_binsize=5, max_output:int=20, rotamer_secondary_structure:str=None, frag_sec_struct_fraction:dict=None, bfactor_cutoff:float=None, score_cutoff:float=None, rmsd_cutoff:float=None):
+def identify_fragments_by_phi_psi(AAalphabet, theozyme_residue, flip_symmetric, flip_histidines, his_central_atom, ligand, covalent_bond, database, fraglib:pd.DataFrame(), rotlib:pd.DataFrame(), frag_pos_to_replace=4, fragsize:int=7, phi_psi_binsize=5, max_output:int=20, rotamer_secondary_structure:str=None, frag_sec_struct_fraction:dict=None, bfactor_cutoff:float=None, score_cutoff:float=None, rmsd_cutoff:float=None, limit_frags_to_chi:bool=True, limit_frags_to_res_id:bool=True):
     '''
     finds fragments based on phi/psi combination and residue identity
     frag_pos_to_replace: the position in the fragment the future rotamer should be inserted. central position recommended.
@@ -401,7 +470,7 @@ def identify_fragments_by_phi_psi(AAalphabet, fraglib:pd.DataFrame(), rotlib:pd.
         raise RuntimeError(f'frag_pos_to_replace ({frag_pos_to_replace[-1]}) must be smaller than fragsize ({fragsize})')
 
     #identify possible rotamer positions in fragment database
-    rotamer_positions = identify_positions_for_rotamer_insertion(fraglib, rotlib, rotamer_secondary_structure, phi_psi_binsize)
+    rotamer_positions = identify_positions_for_rotamer_insertion(fraglib, rotlib, rotamer_secondary_structure, phi_psi_binsize, limit_frags_to_chi, limit_frags_to_res_id)
     logging.info(f'Found {len(rotamer_positions.index)} possible positions for rotamer insertion')
     print(f'Found {len(rotamer_positions.index)} possible positions for rotamer insertion')
 
@@ -433,7 +502,7 @@ def identify_fragments_by_phi_psi(AAalphabet, fraglib:pd.DataFrame(), rotlib:pd.
 
     fragments = Structure.Structure('fragments')
     data = pd.DataFrame()
-    model_num = 1
+    model_num = 0
     frag_num = 1
     for pos in frag_dict:
         logging.info(f'Found {len(frag_dict[pos])} fragments for position {pos}.')
@@ -449,13 +518,16 @@ def identify_fragments_by_phi_psi(AAalphabet, fraglib:pd.DataFrame(), rotlib:pd.
 
         #sort dataframe by average score
         frag_dict[pos] = sort_frags_df_by_score(frag_dict[pos])
-        frag_dict[pos] = filter_fragments(AAalphabet, frag_dict[pos], rmsd_cutoff, max_frags_per_pos, frag_sec_struct_fraction, bfactor_cutoff, score_cutoff)
+
+        frag_dict[pos] = filter_fragments(AAalphabet, theozyme_residue, pos, flip_symmetric, flip_histidines, his_central_atom, ligand, covalent_bond, database, frag_dict[pos], rmsd_cutoff, max_frags_per_pos, frag_sec_struct_fraction, bfactor_cutoff, score_cutoff)
 
         out_frags = int(len([model for model in frag_dict[pos]['structure'].get_models()]))
         logging.info(f'Found {out_frags} of a maximum of {max_frags_per_pos} fragments for position {pos}')
         print(f'Found {out_frags} of a maximum of {max_frags_per_pos} fragments for position {pos}')
 
         df_list = []
+        if out_frags == 0:
+            continue
         for model, df in zip(frag_dict[pos]['structure'].get_models(), frag_dict[pos]['data'].groupby('frag_num', sort=False)):
             model.detach_parent()
             model.id = model_num
@@ -464,6 +536,9 @@ def identify_fragments_by_phi_psi(AAalphabet, fraglib:pd.DataFrame(), rotlib:pd.
             fragments.add(model)
             df_list.append(df[1])
         data = pd.concat([data, pd.concat(df_list)])
+    
+    if data.empty:
+        raise RuntimeError('Could not find any fragments that fit criteria!')
 
     return data, fragments
 
@@ -624,6 +699,8 @@ def align_to_sidechain(entity, entity_residue_to_align, sidechain, flip_symmetri
     #flip the orientation of His residues, flip direction depends on the orientation of the coordinating atom
     if sc_residue_identity == "HIS" and flip_histidines == True:
         if his_central_atom == "auto":
+            if not ligand:
+                raise RuntimeError(f"Ligand is required if using <flip_histidines='auto'>!")
             HIS_NE2 = sidechain["NE2"]
             HIS_ND1 = sidechain["ND1"]
             lig_atoms =  [atom for atom in ligand.get_atoms()]
@@ -712,14 +789,29 @@ def atoms_for_func_group_alignment(residue):
         res_atoms.append(residue[atom])
     return res_atoms
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 'y', '1', 'True'):
+        return True
+    elif v.lower() in ('no', 'false', 'n', '0', 'False'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 
 def main(args):
+    limit_frags_to_res_id = str2bool(args.limit_frags_to_res_id)
+    limit_frags_to_chi = str2bool(args.limit_frags_to_chi)
+    flip_histidines = str2bool(args.flip_histidines)
+    flip_symmetric = str2bool(args.flip_symmetric)
+
     output_dir = utils.path_ends_with_slash(args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename=f"{args.output_dir}fragment_picker_{args.output_prefix}{args.theozyme_resnum}.log")
     cmd = ''
     for key, value in vars(args).items():
-        cmd += f'{key} {value}'
+        cmd += f'--{key} {value} '
     cmd = f'{sys.argv[0]} {cmd}'
     logging.info(cmd)
 
@@ -758,16 +850,22 @@ def main(args):
         ligand = copy.deepcopy(theozyme[0][args.ligand_chain])
         ligand.id = "Z"
         logging.info(f"Found ligand in chain {args.ligand_chain}")
-
-    if residue_identity in tip_symmetric_residues() and args.flip_symmetric == True or residue_identity == "HIS" and args.flip_histidines == True:
-        max_fragments = int(args.max_frags / 2)
     else:
-        max_fragments = args.max_frags
+        logging.info(f"WARNING: No ligand chain specified. Was this intentional?")
 
     if len(args.frag_pos_to_replace) == 1:
         frag_pos_to_replace = frag_pos_to_replace
     else:
         frag_pos_to_replace = [i for i in range(args.frag_pos_to_replace[0], args.frag_pos_to_replace[1]+1)]
+
+    if args.covalent_bond:
+        if not args.ligand_chain:
+            logging.info("WARNING: Covalent bonds are only useful if ligand is present!")
+        for cov_bond in args.covalent_bond.split(','):
+            if not cov_bond.split(':')[0] in [atom.name for atom in theozyme_residue.get_atoms()]:
+                raise KeyError(f"Could not find atom {cov_bond.split(':')[0]} from covalent bond {cov_bond} in residue {args.theozyme_resnum}!")
+            if not cov_bond.split(':')[1] in [atom.name for atom in ligand.get_atoms()]:
+                raise KeyError(f"Could not find atom {cov_bond.split(':')[1]} from covalent bond {cov_bond} in ligand chain {args.ligand_chain}!")
 
     database = utils.path_ends_with_slash(args.database_dir)
     #find rotamer library for given amino acid
@@ -776,6 +874,7 @@ def main(args):
     #filter rotamer library for most probable rotamers
     logging.info(f"Identifying most probable rotamers for residue {residue_identity}")
     rotlib = identify_backbone_angles_suitable_for_rotamer(residue_identity, rotlib, f'{args.output_prefix}{args.theozyme_resnum}_', f'{output_dir}rotamer_info', args.rot_sec_struct, args.phipsi_occurence_cutoff, args.max_phi_psis, args.rotamer_diff_to_best)
+    logging.info(f"Found {len(rotlib.index)} possible phi/psi combinations.")
     #write filtered rotamer library to disk
     rotlibcsv = utils.create_output_dir_change_filename(f'{output_dir}rotamer_info', args.output_prefix + f'rotamers_{args.theozyme_resnum}_{residue_identity}.csv')
     rotlib.to_csv(rotlibcsv)
@@ -789,63 +888,37 @@ def main(args):
     AA_alphabet = utils.import_structure_from_pdb(f'{database_dir}AA_alphabet.pdb')
     #find and create fragments for rotamers
     logging.info(f"Looking for suitable fragments...")
-    frags = identify_fragments_by_phi_psi(AA_alphabet, fraglib, rotlib, frag_pos_to_replace, args.fragsize, args.phi_psi_bin, max_fragments, args.rot_sec_struct, sec_dict, args.bfactor_cutoff, args.score_cutoff, args.rmsd_cutoff)
+
+    frags_table, frags_structure = identify_fragments_by_phi_psi(AA_alphabet, theozyme_residue, flip_symmetric, flip_histidines, args.his_central_atom, ligand, args.covalent_bond, database_dir, fraglib, rotlib, frag_pos_to_replace, args.fragsize, args.phi_psi_bin, args.max_frags, args.rot_sec_struct, sec_dict, args.bfactor_cutoff, args.score_cutoff, args.rmsd_cutoff, limit_frags_to_chi, limit_frags_to_res_id)
+
 
     fragscsv = utils.create_output_dir_change_filename(f'{output_dir}fragment_info', args.output_prefix + f'fragments_{args.theozyme_resnum}_{residue_identity}.csv')
-    frags[0].to_csv(fragscsv)
+    frags_table.to_csv(fragscsv)
 
     #align fragments to theozyme
-    model_num = 0
-    rotamer_fragments = Structure.Structure('rotfrags')
     out_list = []
     logging.info(f"Aligning fragments to theozyme...")
-    for df, model in zip(frags[0].groupby('frag_num', sort=False), frags[1].get_models()):
+    for df, model in zip(frags_table.groupby('frag_num', sort=False), frags_structure.get_models()):
         df = df[1]
         rot = identify_rotamer_position_by_probability(df)
         rotamer_resnum = int(rot['rotamer_pos'])
-        row = pd.Series({'model_num': model_num, 'rotamer_pos': rotamer_resnum, 'AAs': df['AA'].to_list(), 'bb_score': df['bb_score'].to_list(), 'secondary_structure': df['ss'].to_list(), 'bfactor': df['bfactor'].to_list(), 'rotamer_probability': float(rot['probability']), 'pdb': rot['pdb']})
+        row = pd.Series({'model_num': model.id, 'rotamer_pos': rotamer_resnum, 'AAs': df['AA'].to_list(), 'bb_score': df['bb_score'].to_list(), 'secondary_structure': df['ss'].to_list(), 'bfactor': df['bfactor'].to_list(), 'rotamer_probability': float(rot['probability']), 'pdb': rot['pdb']})
         if args.covalent_bond:
             row['covalent_bond'] = args.covalent_bond
         out_list.append(row)
-        model.detach_parent()
-        out = align_to_sidechain(model, model["A"][rotamer_resnum], theozyme_residue, False, False)
-        out.id = model_num
-        rotamer_fragments.add(out)
-        model_num = model_num + 1
-        if model["A"][rotamer_resnum].get_resname() in tip_symmetric_residues() and args.flip_symmetric == True:
-            flipped = copy.deepcopy(out)
-            row_flipped = copy.deepcopy(row)
-            row_flipped['model_num'] = model_num
-            #TODO: adjust the covalent bond for flipped atoms
-            out_list.append(row_flipped)
-            flipped.id = model_num
-            flipped = align_to_sidechain(flipped, flipped["A"][rotamer_resnum], theozyme_residue, args.flip_symmetric, False)
-            rotamer_fragments.add(flipped)
-            model_num = model_num + 1
-        if model["A"][rotamer_resnum].get_resname() == "HIS" and args.flip_histidines == True:
-            flipped = copy.deepcopy(out)
-            row_flipped = copy.deepcopy(row)
-            row_flipped['model_num'] = model_num
-            out_list.append(row_flipped)
-            flipped.id = model_num
-            flipped = align_to_sidechain(flipped, flipped["A"][rotamer_resnum], theozyme_residue, False, args.flip_histidines, args.his_central_atom, ligand)
-            rotamer_fragments.add(flipped)
-            model_num = model_num + 1
     out_df = pd.DataFrame(out_list)
-    logging.info(f'Found {len([model for model in rotamer_fragments])} fragments that passed all filters.')
-    print(f'Found {len([model for model in rotamer_fragments])} fragments that passed all filters.')
+    logging.info(f'Found {len([model for model in frags_structure])} fragments that passed all filters.')
+    print(f'Found {len([model for model in frags_structure])} fragments that passed all filters.')
 
     #copy ligand to each model
     if args.ligand_chain:
         out_df['ligand_chain'] = 'Z'
-        for model in rotamer_fragments.get_models():
+        for model in frags_structure.get_models():
             model.add(ligand)
-    if args.covalent_bond:
-        out_df['covalent_bond'] = args.covalent_bond
     logging.info(f"Writing rotamer backbone fragments to disk...")
     #save output file
     filename_pdb = utils.create_output_dir_change_filename(output_dir, args.output_prefix + f'{args.theozyme_resnum}_{residue_identity}.pdb')
-    utils.write_multimodel_structure_to_pdb(rotamer_fragments, filename_pdb)
+    utils.write_multimodel_structure_to_pdb(frags_structure, filename_pdb)
     out_df['poses'] = os.path.abspath(filename_pdb)
     out_df['poses_description'] = f'{args.output_prefix}{args.theozyme_resnum}_{residue_identity}'
     filename_json = utils.create_output_dir_change_filename(output_dir, args.output_prefix + f'{args.theozyme_resnum}_{residue_identity}.json')
@@ -882,18 +955,19 @@ if __name__ == "__main__":
 
 
     # stuff you probably don't want to touch
-    argparser.add_argument("--limit_frags_to_res_id", type=bool, default=True, help="Only pick fragments that contain the rotamer residue identity at the specified position with given phi/psi angle combination")
-    argparser.add_argument("--limit_frags_to_chi", type=bool, default=True, help="Only pick fragments that contain the rotamer with chi angles within the bin range of the target chi angle")
+    argparser.add_argument("--limit_frags_to_res_id", type=str, default="True", help="Only pick fragments that contain the rotamer residue identity at the specified position with given phi/psi angle combination")
+    argparser.add_argument("--limit_frags_to_chi", type=str, default="True", help="Only pick fragments that contain the rotamer with chi angles within the bin range of the target chi angle")
     argparser.add_argument("--phi_psi_bin", type=float, default=10, help="Binsize used to identify if fragment fits to phi/psi combination")
-    argparser.add_argument("--bfactor_cutoff", type=float, default=60, help="Only accept fragments with average bfactor below this value")
+    argparser.add_argument("--bfactor_cutoff", type=float, default=None, help="Only accept fragments with average bfactor below this value")
     argparser.add_argument("--max_phi_psis", type=int, default=5, help="maximum number of phi/psi combination that should be returned. Can be increased if not enough fragments are found downstream (e.g. because secondary structure filter was used, and there are not enough phi/psi combinations in the output that fit to the specified secondary structure.")
     argparser.add_argument("--rotamer_diff_to_best", type=float, default=0.05, help="Accept rotamers that have a probability not lower than this percentage of the most probable rotamer")
-    argparser.add_argument("--flip_histidines", type=bool, default=True, help="Flip the orientation of histidine residues to generate more fragment orientations (doubles number of fragments if set to true!")
+    argparser.add_argument("--flip_histidines", type=str, default="True", help="Flip the orientation of histidine residues to generate more fragment orientations (doubles number of fragments if set to true!")
     argparser.add_argument("--his_central_atom", type=str, default="auto", help="Only important if rotamer is HIS and flip_histidines is True, sets the name of the atom that should not be flipped.If auto, the histidine nitrogen closest to the ligand is the coordinating atom. Can be manually set to NE2 or ND1")
-    argparser.add_argument("--flip_symmetric", type=bool, default=True, help="Flip tip symmetric residues.")
+    argparser.add_argument("--flip_symmetric", type=str, default="True", help="Flip tip symmetric residues.")
 
     #argparser.add_argument("--prob_cutoff", type=float, default=0.0, help="Do not return any phi/psi combinations with chi angle probabilities below this value")
-
+    
     args = argparser.parse_args()
+
 
     main(args)
