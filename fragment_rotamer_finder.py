@@ -326,7 +326,7 @@ def import_vdw_radii(database_dir):
     vdw_radii = vdw_radii.set_index('element')['VdW_radius'].to_dict()
     return vdw_radii
 
-def distance_detection(entity1, entity2, bb_only:bool=True, ligand:bool=False, clash_detection_vdw_multiplier:float=1.0, database:str='database', resnum:int=None, covalent_bonds:str=None):
+def distance_detection(entity1, entity2, bb_only:bool=True, ligand:bool=False, clash_detection_vdw_multiplier:float=1.0, database:str='database', resnum:int=None, covalent_bonds:str=None, ignore_func_groups:bool=True):
     '''
     checks for clashes by comparing VanderWaals radii. If clashes with ligand should be detected, set ligand to true. Ligand chain must be added as second entity.
     bb_only: only detect backbone clashes between to proteins or a protein and a ligand.
@@ -348,6 +348,8 @@ def distance_detection(entity1, entity2, bb_only:bool=True, ligand:bool=False, c
     for atom_combination in itertools.product(entity1_atoms, entity2_atoms):
         #skip clash detection for covalent bonds
         covalent = False
+        if ignore_func_groups == True and atom_combination[0].name in atoms_of_functional_groups():
+            covalent = True
         if resnum and covalent_bonds:
             for cov_bond in covalent_bonds.split(','):
                 if atom_combination[0].get_parent().id[1] == resnum and atom_combination[0].name == cov_bond.split(':')[0] and atom_combination[1].name == cov_bond.split(':')[1]:
@@ -361,6 +363,9 @@ def distance_detection(entity1, entity2, bb_only:bool=True, ligand:bool=False, c
         if distance < clash_detection_limit:
             return True
     return False
+
+def atoms_of_functional_groups():
+    return ["NH1", "NH2", "OD1", "OD2", "ND2", "NE", "SG", "OE1", "OE2", "NE2", "ND1", "NZ", "SD", "OG", "OG1", "NE1", "OH"]
 
 
 def sort_frags_df_by_score(fragment_df):
@@ -780,7 +785,7 @@ def atoms_for_func_group_alignment(residue):
         atoms = ["NE1", "CZ3", "CG"]
     elif sc_residue_identity == "TYR":
         atoms = ["CE1", "CE2", "OH"]
-    elif sc_residue_identity == "THR":
+    elif sc_residue_identity == "VAL":
         atoms = ["CG1", "CG2", "CB"]
     else:
         raise RuntimeError(f'Unknown residue with name {sc_residue_identity}!')
@@ -949,8 +954,8 @@ if __name__ == "__main__":
     argparser.add_argument("--frag_sec_struct_fraction", type=str, default=None, help="Limit to fragments containing at least fraction of residues with the provided secondary structure. If fragment should have at least 50 percent helical residues OR 60 percent beta-sheet, pass 'H:0.5,E:0.6'")
     argparser.add_argument("--max_frags", type=int, default=30, help="Maximum number of frags that should be returned.")
     argparser.add_argument("--rmsd_cutoff", type=float, default=1.0, help="Set minimum RMSD of output fragments. Increase to get more diverse fragments, but high values might lead to very long runtime!")
-    argparser.add_argument("--score_cutoff", type=float, default=-0.5, help="Maximum mean backbone score of fragments (sum of omega, rama_prepro, hbond_sr_bb, p_aa_pp Rosetta scoreterms with ref15 weights)")
-    argparser.add_argument("--phipsi_occurence_cutoff", type=float, default=1, help="Limit how common the phi/psi combination of a certain rotamer has to be. Value is in %")
+    argparser.add_argument("--score_cutoff", type=float, default=0.5, help="Maximum mean backbone score of fragments (sum of omega, rama_prepro, hbond_sr_bb, p_aa_pp Rosetta scoreterms with ref15 weights)")
+    argparser.add_argument("--phipsi_occurence_cutoff", type=float, default=0.5, help="Limit how common the phi/psi combination of a certain rotamer has to be. Value is in %")
     argparser.add_argument("--covalent_bond", type=str, default=None, help="Add covalent bond(s) between rotamer and ligand in the form 'RotAtomA:LigAtomA,RotAtomB:LigAtomB'. Atom names should follow PDB numbering schemes, e.g. 'NZ:C3' for a covalent bond between a Lysine nitrogen and the third carbon atom of the ligand.")
 
 
@@ -960,7 +965,7 @@ if __name__ == "__main__":
     argparser.add_argument("--phi_psi_bin", type=float, default=10, help="Binsize used to identify if fragment fits to phi/psi combination")
     argparser.add_argument("--bfactor_cutoff", type=float, default=None, help="Only accept fragments with average bfactor below this value")
     argparser.add_argument("--max_phi_psis", type=int, default=5, help="maximum number of phi/psi combination that should be returned. Can be increased if not enough fragments are found downstream (e.g. because secondary structure filter was used, and there are not enough phi/psi combinations in the output that fit to the specified secondary structure.")
-    argparser.add_argument("--rotamer_diff_to_best", type=float, default=0.05, help="Accept rotamers that have a probability not lower than this percentage of the most probable rotamer")
+    argparser.add_argument("--rotamer_diff_to_best", type=float, default=0.15, help="Accept rotamers that have a probability not lower than this percentage of the most probable rotamer")
     argparser.add_argument("--flip_histidines", type=str, default="True", help="Flip the orientation of histidine residues to generate more fragment orientations (doubles number of fragments if set to true!")
     argparser.add_argument("--his_central_atom", type=str, default="auto", help="Only important if rotamer is HIS and flip_histidines is True, sets the name of the atom that should not be flipped.If auto, the histidine nitrogen closest to the ligand is the coordinating atom. Can be manually set to NE2 or ND1")
     argparser.add_argument("--flip_symmetric", type=str, default="True", help="Flip tip symmetric residues.")

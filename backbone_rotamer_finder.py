@@ -232,7 +232,7 @@ def atoms_for_func_group_alignment(residue):
     if sc_residue_identity == "ALA":
         atoms = ["CB", "CA", "N"]
     elif sc_residue_identity == "ARG":
-        atoms = ["NH1", "NH2", "CZ"]
+        atoms = ["NH1", "NH2", "NE"]
     elif sc_residue_identity == "ASP":
         atoms = ["OD1", "OD2", "CG"]
     elif sc_residue_identity == "ASN":
@@ -267,7 +267,7 @@ def atoms_for_func_group_alignment(residue):
         atoms = ["NE1", "CZ3", "CG"]
     elif sc_residue_identity == "TYR":
         atoms = ["CE1", "CE2", "OH"]
-    elif sc_residue_identity == "THR":
+    elif sc_residue_identity == "VAL":
         atoms = ["CG1", "CG2", "CB"]
     else:
         raise RuntimeError(f'Unknown residue with name {sc_residue_identity}!')
