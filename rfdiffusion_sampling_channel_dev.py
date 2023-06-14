@@ -18,7 +18,7 @@ import utils.pymol_tools
 from utils.plotting import PlottingTrajectory
 import utils.metrics as metrics
 import superimposition_tools
-from protocols import calculate_fastrelax_sidechain_rsmd
+from protocols.composite_protocols import calculate_fastrelax_sidechain_rmsd
 
 def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None, use_soluble_model:bool=False) -> Poses:
     '''AAA'''
@@ -502,12 +502,16 @@ def main(args):
     af2_catres_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix="af2_catres")
 
     # calculate average sidechain RMSD:
-    sc_rmsd_opts = "-parser:protocol /home/mabr3112/fastrelax_rmsdcheck.xml -beta"
-    ensembles = calculate_fastrelax_sidechain_rmsd(ensembles, prefix="post_refinement_rmsdcheck", options=sc_rmsd_opts, sidechain_residues="fixed_residues", sidechain_ref_pdb_col="updated_reference_frags_location", n=15)
+    sc_rmsd_opts = "-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_rmsdcheck.xml -beta"
+    ensembles = calculate_fastrelax_sidechain_rmsd(ensembles, prefix="post_refinement_rmsdcheck", options=sc_rmsd_opts, sidechain_residues="fixed_residues", sidechain_ref_pdb_col="updated_reference_frags_location", n=15, pose_options=None)
 
     # plot af2_stats:
+    cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_fr_sap_score"]
+    titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "SAP Score"]
+    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "SAP Score [AU]"]
+    dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,150)]
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plot_dir}/af2_stats.png")
     
-
     # superimpose poses on reference frags and calculate ligand scores:
     if keep_ligand_chain: 
         # add back the ligand and calculate lig scores:
@@ -515,7 +519,7 @@ def main(args):
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_refinement", ligand_chain=args.ligand_chain)
 
     # remove any structures that have an AF2 pLDDT below 85, Ca RMSD > 1
-    ensembles.poses_df = ensembles.poses_df[(ensembles.poses_df["af2_top_plddt"] <= 85) & (df["af2_bb_ca_rmsd"] <= 1) & (df["af2_bb_ca_motif_rmsd"] <= 1.5)]
+    #ensembles.poses_df = ensembles.poses_df[(ensembles.poses_df["af2_top_plddt"] <= 85) & (ensembles.poses_df["af2_bb_ca_rmsd"] <= 1) & (ensembles.poses_df["af2_bb_ca_motif_rmsd"] <= 1.5)]
 
     # final backbone downsampling
     final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.5])
@@ -526,6 +530,8 @@ def main(args):
     ref_frag_dir = f"{results_dir}/ref_fragments/"
     if not os.path.isdir(ref_frag_dir): os.makedirs(ref_frag_dir, exist_ok=True)
     ensembles.dump_poses(results_dir)
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plot_dir}/af2_final_stats.png")
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{results_dir}/af2_final_stats.png")
 
     # Copy and rewrite Fragments into output_dir/reference_fragments
     updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=ref_frag_dir, keep_ligand_chain=args.ligand_chain)
