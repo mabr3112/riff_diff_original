@@ -917,7 +917,7 @@ def main(args):
                 #flip rotamer and fragment if theozyme residue is tip symmetric or a histidine
                 if ((flip_symmetric == True and theozyme_residue.get_resname() in tip_symmetric_residues()) or (flip_histidines == True and theozyme_residue.get_resname() == "HIS")) and len(picked_frags) < max_frags:
                     flipped_frag = copy.deepcopy(frag)
-                    flipped_frag = align_to_sidechain(frag, frag[pos], theozyme_residue, True, True, args.his_central_atom, ligand)
+                    flipped_frag = align_to_sidechain(flipped_frag, frag[pos], theozyme_residue, True, True, args.his_central_atom, ligand)
                     picked_frags, frag_dfs = check_fragment(flipped_frag, picked_frags, frag_df, frag_dfs, ligand, vdw_radii, pos, args.covalent_bond, args.rmsd_cutoff, args.backbone_ligand_clash_detection_vdw_multiplier, args.rotamer_ligand_clash_detection_vdw_multiplier)
             else:
                 break
