@@ -78,7 +78,7 @@ def collapse_dict_values(in_dict: dict) -> str:
 def write_fastdesign_opts(row: pd.Series, cycle: int, total_cycles: int, reference_location_col:str, designres_col: str, motif_res_col: str, cat_res_col: str, resfile_col: str) -> str:
     def collapse_dict_values(in_dict: dict) -> str:
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
-    return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.5 - (0.4 * cycle/total_cycles)} resfile={row[resfile_col]}"
+    return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.8 - (0.4 * cycle/total_cycles)} resfile={row[resfile_col]}"
 
 def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues"):
     '''AAA'''
@@ -484,8 +484,11 @@ def main(args):
         refinement_total_score_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_refinement_total_score"], c_pref)
         refinement_motif_ca_rmsd_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_refinement_bb_ca_motif_rmsd"], c_pref)
 
-        #filter
-        cycle_filter = ensembles.filter_poses_by_score(5, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=filter_layers, plot=(fst := [f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"]))
+        #filter down for next cycle, or if in last cycle, filter for AF2 prediction input:
+        if i+1 < args.refinement_cycles:
+            cycle_filter = ensembles.filter_poses_by_score(5, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=filter_layers, plot=(fst := [f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"]))
+        else:
+            cycle_filter = ensembles.filter_poses_by_score(25, f"{c_pref}_esm_comp_score", prefix=f"{c_pref}_final_filter", remove_layers=filter_layers, plot=(fst := [f"{c_pref}_esm_comp_score", f"{c_pref}_esm_plddt", f"{c_pref}_esm_bb_ca_rmsd", f"{c_pref}_esm_bb_ca_motif_rmsd", f"{c_pref}_esm_catres_motif_heavy_rmsd"]))
         
         # reindex poses
         index_removed = ensembles.reindex_poses(out_dir=f"{c_pref}_reindexed_poses", remove_layers=index_layers_to_remove)
@@ -496,7 +499,7 @@ def main(args):
     
     ############################################ POST REFINEMENT WORKUP ############################################################
     # repredict with AlphaFold2 and calculate RMSDs
-    af2_preds = ensembles.predict_sequences(run_AlphaFold2, options="--msa-mode single_sequence", prefix="af2")
+    af2_preds = ensembles.predict_sequences(run_AlphaFold2, options="--msa-mode single_sequence ", prefix="af2")
     af2_bb_ca_rmsd = ensembles.calc_bb_rmsd_df(ref_pdb=f"{c_pref}_refinement_location", metric_prefix="af2")
     af2_motif_ca_rmsd = ensembles.calc_motif_bb_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", metric_prefix="af2_bb_ca")
     af2_catres_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix="af2_catres")
@@ -506,10 +509,10 @@ def main(args):
     ensembles = calculate_fastrelax_sidechain_rmsd(ensembles, prefix="post_refinement_rmsdcheck", options=sc_rmsd_opts, sidechain_residues="fixed_residues", sidechain_ref_pdb_col="updated_reference_frags_location", n=15, pose_options=None)
 
     # plot af2_stats:
-    cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_fr_sap_score"]
-    titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "SAP Score"]
-    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "SAP Score [AU]"]
-    dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,150)]
+    cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_rmsd", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_fr_sap_score"]
+    titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "Relax \n Sidechain RMSD", "SAP Score"]
+    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "SAP Score [AU]"]
+    dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,5), (0,5), (0,150)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plot_dir}/af2_stats.png")
     
     # superimpose poses on reference frags and calculate ligand scores:
@@ -518,8 +521,12 @@ def main(args):
         lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"final_redesign_lig_poses")
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_refinement", ligand_chain=args.ligand_chain)
 
+    print(len(ensembles.poses_df))
+
     # remove any structures that have an AF2 pLDDT below 85, Ca RMSD > 1
     #ensembles.poses_df = ensembles.poses_df[(ensembles.poses_df["af2_top_plddt"] <= 85) & (ensembles.poses_df["af2_bb_ca_rmsd"] <= 1) & (ensembles.poses_df["af2_bb_ca_motif_rmsd"] <= 1.5)]
+
+    print(len(ensembles.poses_df))
 
     # final backbone downsampling
     final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.5])
