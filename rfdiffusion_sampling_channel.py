@@ -32,7 +32,7 @@ def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts"
     fr_filter = poses.filter_poses_by_score(2, f"{prefix}_fr_comp_score", remove_layers=1, prefix=f"{prefix}_refinement_filter", plot=[f"{prefix}_refinement_total_score", f"{prefix}_refinement_bb_ca_motif_rmsd"])
 
     # design and predict:
-    poses = mpnn_design_and_esmfold(poses, prefix=prefix, num_mpnn_seqs=48, num_esm_inputs=16, num_esm_outputs_per_input_backbone=5, motif_ref_pdb_col=ref_pdb_col, bb_rmsd_col=f"{prefix}_refinement_location", rmsd_weight=3, mpnn_fixedres_col=mpnn_fixedres_col, use_soluble_model=use_soluble_model)
+    poses = mpnn_design_and_esmfold(poses, prefix=prefix, num_mpnn_seqs=48, num_esm_inputs=16, num_esm_outputs_per_input_backbone=5, motif_ref_pdb_col=ref_pdb_col, bb_rmsd_col=f"{prefix}_refinement_location", rmsd_weight=3, mpnn_fixedres_col=mpnn_fixedres_col, use_soluble_model=use_soluble_model, disfavor_alanines=1)
     return poses
 
 def mpnn_fr(poses, prefix:str, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, reference_location_col="input_poses"):
@@ -80,11 +80,17 @@ def write_fastdesign_opts(row: pd.Series, cycle: int, total_cycles: int, referen
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
     return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.8 - (0.4 * cycle/total_cycles)} resfile={row[resfile_col]}"
 
-def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues"):
+def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues", disfavor_alanines:int=1):
     '''AAA'''
     # Run MPNN and filter (by half)
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues", use_soluble_model=use_soluble_model)
-    mpnn_seqfilter = poses.filter_poses_by_score(num_esm_inputs, f"{prefix}_mpnn_score", prefix=f"{prefix}_mpnn_seqfilter", remove_layers=1)
+    poses.poses_df[f"{prefix}_alanine_content"] = poses.poses_df[f"{prefix}_mpnn_sequence"].str.count("A") / poses.poses_df[f"{prefix}_mpnn_sequence"].str.len()
+    alanine_content_weight = (poses.poses_df[f"{prefix}_alanine_content"].mean() - 0.1) * 8 * disfavor_alanines 
+    print(f"alanine_content_weight: {alanine_content_weight}")
+
+    # calc composite score between MPNN score and alanine content:
+    mpnn_compscore = poses.calc_composite_score(f"{prefix}_mpnn_compscore", [f"{prefix}_mpnn_score", f"{prefix}_alanine_content"], [1, alanine_content_weight])
+    mpnn_seqfilter = poses.filter_poses_by_score(num_esm_inputs, f"{prefix}_mpnn_compscore", prefix=f"{prefix}_mpnn_seqfilter", remove_layers=1, plot=[f"{prefix}_mpnn_score", f"{prefix}_alanine_content"])
 
     # Run ESMFold and calc bb_ca_rmsd, motif_ca_rmsd and motif_heavy RMSD
     esm_preds = poses.predict_sequences(run_ESMFold, prefix=f"{prefix}_esm")
@@ -351,7 +357,7 @@ def main(args):
     # RFdiffusion:
     diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:substrate_contacts_positive,weight:{args.pot_weight},pos_weight:{args.pos_weight},attr_dist:{args.attr_dist},decentralize:{args.decentralize}\\'] potentials.guide_decay={args.guide_decay}"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
-    ensembles.poses_df["rfdiffusion_pose_opts"] = [x.replace("contigmap.contigs=[", "contigmap.contigs=[Q5-16/0 ") for x in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
+    ensembles.poses_df["rfdiffusion_pose_opts"] = [x.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ") for x in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
     ######################### RFDiffusion POSTPROCESSING #####################################################
@@ -416,7 +422,7 @@ def main(args):
 
     ######################### ROUND1 ESMFold ###############################################
     # run mpnn and predict with ESMFold:
-    ensembles = mpnn_design_and_esmfold(ensembles, prefix="round1", num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_col=f"{cycle_prefix}_fr_location", motif_ref_pdb_col="updated_reference_frags_location")
+    ensembles = mpnn_design_and_esmfold(ensembles, prefix="round1", num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_col=f"{cycle_prefix}_fr_location", motif_ref_pdb_col="updated_reference_frags_location", disfavor_alanines=1)
 
     # superimpose poses on reference frags and calculate ligand scores:
     if keep_ligand_chain: 
@@ -560,6 +566,7 @@ if __name__ == "__main__":
     argparser.add_argument("--refinement_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/fd_prob_refine_dev.xml")
     argparser.add_argument("--refinement_cycles", type=int, default=5, help="Number of Fastrelax-mpnn-esmfold refinement cycles to run.")
     argparser.add_argument("--diffuse_only", type=str, default="False", help="Set to 'True' if you want only to run RFdiffusion and no refinement!")
+    argparser.add_argument("--channel_contig", type=str, default="Q5-16", help="Contig string of the channel protein")
 
     # rfdiffusion options
     argparser.add_argument("--num_rfdiffusions", type=int, default=10, help="Number of rfdiffusion trajectories.")
@@ -580,7 +587,7 @@ if __name__ == "__main__":
 
     # mpnn options
     argparser.add_argument("--num_mpnn_inputs", type=int, default=180, help="Number of input backbones to ProteinMPNN before predicting them with ESMFold")
-    argparser.add_argument("--num_mpnn_seqs", type=int, default=40, help="Number of MPNN Sequences to generate for each input backbone.")
+    argparser.add_argument("--num_mpnn_seqs", type=int, default=60, help="Number of MPNN Sequences to generate for each input backbone.")
     argparser.add_argument("--num_esm_inputs", type=int, default=12, help="Number of MPNN Sequences for each input backbone that should be predicted. Typically quarter to half of the sequences generated by MPNN is a good value.")
     argparser.add_argument("--num_esm_outputs_per_input_backbone", type=int, default=1, help="Number of ESM Outputs for each backbone that is inputted to ESMFold.")
 
