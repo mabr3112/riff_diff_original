@@ -419,7 +419,7 @@ def assemble_pdb(path_series: pd.Series, out_path: str, fragment_dict_dict: dict
         # adding a channel only works if a ligand is present:
         if add_channel and auto_superimpose_channel:
             pose = utils.biopython_tools.add_polyala_to_pose(pose, polyala_path=add_channel, polyala_chain="Q", ligand_chain=args.ligand_chain)
-        elif add_channel and auto_superimpose_channel.lower() == "false":
+        elif add_channel:
             pose.add(load_structure_from_pdbfile(add_channel)["Q"])
 
     # store the pose
@@ -982,7 +982,7 @@ if __name__ == "__main__":
     argparser.add_argument("--pdb_length", type=int, default=100, help="Maximum length of the pdb-files that will be inpainted.")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="PDB letter for Ligand chain. The ligand will be used as substrate during diffusion.")
     argparser.add_argument("--add_channel", type=str, default="/home/mabr3112/riff_diff/utils/helix_cone_long.pdb", help="If specified, adds the structure specified to the fragment to be used as a 'substrate channel' during diffusion. IMPORTANT!!!  Channel pdb-chain name has to be 'Q' ")
-    argparser.add_argument("--auto_superimpose_channel", type=str, default=True, help="Set to false, if you want to copy the channel pdb-chain from the reference file without superimposing on moitf-substrate centroid axis.")
+    argparser.add_argument("--auto_superimpose_channel", type=str, default="True", help="Set to false, if you want to copy the channel pdb-chain from the reference file without superimposing on moitf-substrate centroid axis.")
 
     # Filter Options
     argparser.add_argument("--max_linker_length", type=int, default=10, help="Maximum length of linkers that the fragments should be connected with.")
