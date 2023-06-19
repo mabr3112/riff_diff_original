@@ -328,6 +328,7 @@ def main(args):
     ensembles.max_rfdiffusion_gpus = args.max_rfdiffusion_gpus
     plot_dir = ensembles.plot_dir
     keep_ligand_chain = check_for_params(args.input_dir, args.ligand_chain)
+    if keep_ligand_chain: ensembles.poses_df["params_file_path"] = [f"{args.input_dir}/ligand/LG1.params" for x in ensembles.poses_df["poses"].to_list()]
 
     # Read scores of selected paths from ensemble_evaluator and store them in poses_df:
     path_df = pd.read_json(f"{args.input_dir}/selected_paths.json").reset_index().rename(columns={"index": "rdescription"})
@@ -517,7 +518,7 @@ def main(args):
     # plot af2_stats:
     cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_rmsd", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_fr_sap_score"]
     titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "Relax \n Sidechain RMSD", "SAP Score"]
-    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "SAP Score [AU]"]
+    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "SAP Score [AU]"]
     dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,5), (0,5), (0,150)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plot_dir}/af2_stats.png")
     
