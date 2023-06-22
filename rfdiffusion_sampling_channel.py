@@ -100,6 +100,7 @@ def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inp
 
     # Filter Redesigns based on confidence and RMSDs
     esm_comp_score = poses.calc_composite_score(f"{prefix}_esm_comp_score", [f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_motif_rmsd"], [-1, rmsd_weight])
+    if args.calc_perplexity: esm_singlepass_logprobs = poses.calc_esm2_pseudo_perplexity(options="--singlepass True", prefix=f"round1_singlepass", max_cores=1000)
     esm_filter = poses.filter_poses_by_score(num_esm_outputs_per_input_backbone, f"{prefix}_esm_comp_score", remove_layers=1, prefix=f"{prefix}_esm_filter", plot=[f"{prefix}_esm_comp_score", f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_rmsd", f"{prefix}_esm_bb_ca_motif_rmsd", f"{prefix}_esm_catres_motif_heavy_rmsd"])
     
     # Plot Results
@@ -389,12 +390,14 @@ def main(args):
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="rfdiffusion", ligand_chain=args.ligand_chain)
 
     # filter based on rfdiffusion pLDDT (implement args.rfdiffusion_plddt_fraction):
-    rfdiff_plddt_filter = ensembles.filter_poses_by_score(0.8, "rfdiffusion_plddt", prefix="rfdiffusion_plddt_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
+    rfdiff_plddt_filter = ensembles.filter_poses_by_score(0.95, "rfdiffusion_plddt", prefix="rfdiffusion_plddt_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
 
     # filter based on ligand_contacts:
-    rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.5, "rfdiffusion_pocket_score_v2", prefix="rfdiffusion_pocket_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
+    rfdiff_pocket_comp_score = ensembles.calc_composite_score(f"pocket_comp_score", ["rfdiffusion_pocket_score_v2", "rfdiffusion_peratom_ligand_contacts"], [-1, 1])
+    rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.95, "pocket_comp_score", prefix="rfdiffusion_pocket_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
 
-    if args.diffuse_only.lower() == "true": sys.exit(1)
+    # remove structures with template RMSDs > 1
+    ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["rfdiffusion_template_bb_ca_motif_rmsd"] <= 1]
 
     ######################## MPNN-FASTDesign-MPNN #################################################
     # cycle MPNN and FastRelax:
@@ -418,7 +421,7 @@ def main(args):
     if keep_ligand_chain: calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="pre_esm", ligand_chain=args.ligand_chain)
 
     # filter down by total_score to max_esm_inputs:
-    pre_mpnn_comp_score = ensembles.calc_composite_score("pre_esm_comp_score", [f"{cycle_prefix}_fr_total_score", f"pre_esm_pocket_score_v2"], [1, -1])
+    pre_mpnn_comp_score = ensembles.calc_composite_score("pre_esm_comp_score", [f"{cycle_prefix}_fr_total_score", f"pre_esm_pocket_score_v2", f"pre_esm_ligand_contacts", f"rfdiffusion_rog"], [1, -1, 1, 1])
     total_score_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, f"pre_esm_comp_score", prefix=f"pre_mpnn_filter", plot=["pre_esm_peratom_ligand_contacts", f"{cycle_prefix}_fr_total_score", f"{cycle_prefix}_fr_bb_ca_motif_rmsd", f"pre_esm_pocket_score", f"pre_esm_pocket_score_v2", f"pre_esm_pocket_score_v3"])
 
     ######################### ROUND1 ESMFold ###############################################
@@ -432,7 +435,7 @@ def main(args):
 
     # Filter down to final set of .pdbs that will be input for Rosetta Refinement:
     #scoreterms, weights = parse_outfilter_args(args.output_scoreterms, args.output_scoreterm_weights, ensembles.poses_df, prefix="round1")
-    out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", (st := [f"round1_esm_plddt", f"round1_esm_bb_ca_motif_rmsd", f"post_esm_pocket_score_v2"]), [-0.5,1,-1])
+    out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", (st := [f"round1_esm_plddt", f"round1_esm_bb_ca_motif_rmsd", f"post_esm_pocket_score_v2", f"post_esm_ligand_contacts"]), [-0.75,1.5,-0.75,0.75])
     out_filter = ensembles.filter_poses_by_score(args.num_refinement_inputs, f"out_filter_comp_score", prefix="out_filter", plot=st)
     results_dir = f"{args.output_dir}/intermediate_results/"
     ref_frag_dir = f"{results_dir}/ref_fragments/"
@@ -451,6 +454,8 @@ def main(args):
     dumped = ensembles.dump_poses(f"{results_dir}/pdb_in/")
     out_df = ensembles.poses_df[["poses_description", "fixed_residues", "motif_residues"]].set_index("poses_description")
     out_df.to_json(f"{results_dir}/motif_res.json")
+
+    if args.diffuse_only.lower() == "true": sys.exit(1)
 
     #################### REFINEMENT ######################################
     # initial number of refinement runs is higher:
@@ -587,7 +592,7 @@ if __name__ == "__main__":
     argparser.add_argument("--overwrite_linker_lengths", type=str, default='50,200', help="specify first total length of the protein, then maximum length that should be assigned to the linkers.\nExample: --overwrite_linker_lengths='50,200' -> would set the maximum length of the protein to 200 and would overwrite the linkers to ranges between ~5-75.")
 
     # mpnn options
-    argparser.add_argument("--num_mpnn_inputs", type=int, default=180, help="Number of input backbones to ProteinMPNN before predicting them with ESMFold")
+    argparser.add_argument("--num_mpnn_inputs", type=int, default=300, help="Number of input backbones to ProteinMPNN before predicting them with ESMFold")
     argparser.add_argument("--num_mpnn_seqs", type=int, default=60, help="Number of MPNN Sequences to generate for each input backbone.")
     argparser.add_argument("--num_esm_inputs", type=int, default=12, help="Number of MPNN Sequences for each input backbone that should be predicted. Typically quarter to half of the sequences generated by MPNN is a good value.")
     argparser.add_argument("--num_esm_outputs_per_input_backbone", type=int, default=1, help="Number of ESM Outputs for each backbone that is inputted to ESMFold.")

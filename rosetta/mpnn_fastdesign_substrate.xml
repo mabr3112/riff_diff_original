@@ -29,6 +29,7 @@
 	<SIMPLE_METRICS>
 	</SIMPLE_METRICS>
 	<FILTERS>
+		<SSShapeComplementarity name="ss_sc" loops="false" helices="true" />
 	</FILTERS>
 	<MOVERS>
 		<PyMOLMover name="pmm" keep_history="1" />
@@ -65,6 +66,7 @@
 		<Add mover_name="rm_bb_ca_cst" />
 		<Add mover_name="fastrelax" />
 		<Add mover_name="pmm" />
+		<Add filter_name="ss_sc" />
 	</PROTOCOLS>
 	<OUTPUT scorefxn="beta" />
 </ROSETTASCRIPTS>
