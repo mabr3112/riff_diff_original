@@ -33,7 +33,7 @@ from models.riff_diff_models import *
 import utils.plotting as plots
 import utils.biopython_tools
 from utils.rdkit_tools import convert_pdb_to_mol
-
+from utils.obabel_tools import obabel_fileconverter
 
 ########### Collecting Unique Elements from DF #######################
 def extract_unique_frags_from_dict(input_dict: dict):
@@ -587,7 +587,7 @@ def get_covalent_bonds(input_series: pd.DataFrame, fragments_dict: dict, input_d
     cov_bonds = list()
     for i, frag_d in enumerate(extracted_frag_dicts):
         if "covalent_bond" in frag_d["fragment_picking_info"]:
-            cov_bonds.append(compile_covalent_bond_str(frag_d, fragment_index=i, lig_resnum=lig_resnum, lig_name=lig_name))
+            cov_bonds.append(compile_covalent_bond_str(frag_d, fragment_index=i, lig_resnum=1, lig_name=lig_name)) # changed lig_resnum to 1, because it is always changed to 1 by molfile_to_params.py
 
     return ",".join(cov_bonds)
 
@@ -931,7 +931,7 @@ def main(args):
     if len(list(ligand.get_atoms())) > 2:
         # store ligand as .mol file for rosetta .molfile-to-params.py
         logging.info(f"Running 'molfile_to_params.py' to generate params file for Rosetta.")
-        lig_molfile = convert_pdb_to_mol(lig_path)
+        lig_molfile = obabel_fileconverter(input_file=lig_path, output_file=lig_path.replace(".pdb", ".mol2"), input_format="pdb", output_format=".mol2")
         run(f"python3 {script_dir}/rosetta/molfile_to_params.py -n {substrate_name} -p {lig_folder}/LG1 {lig_molfile} --keep-names --clobber --chain={args.ligand_chain}", shell=True, stdout=True, check=True, stderr=True)
         lig_path = f"{lig_folder}/LG1_0001.pdb"
     else:
