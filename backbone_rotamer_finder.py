@@ -229,52 +229,32 @@ def atoms_for_func_group_alignment(residue):
     return the atoms used for superposition via functional groups
     '''
     sc_residue_identity = residue.get_resname()
-    if sc_residue_identity == "ALA":
-        atoms = ["CB", "CA", "N"]
-    elif sc_residue_identity == "ARG":
-        atoms = ["NH1", "NH2", "CZ"]
-    elif sc_residue_identity == "ASP":
-        atoms = ["OD1", "OD2", "CG"]
-    elif sc_residue_identity == "ASN":
-        atoms = ["OD1", "ND2", "CG"]
-    elif sc_residue_identity == "CYS":
-        atoms = ["SG", "CB", "CA"]
-    elif sc_residue_identity == "GLU":
-        atoms = ["OE1", "OE2", "CD"]
-    elif sc_residue_identity == "GLN":
-        atoms = ["OE1", "NE2", "CD"]
-    elif sc_residue_identity == "GLY":
-        atoms = ["CA", "N", "C"]
-    elif sc_residue_identity == "HIS":
-        atoms = ["ND1", "NE2", "CG"]
-    elif sc_residue_identity == "ILE":
-        atoms = ["CD1", "CG1", "CB"]
-    elif sc_residue_identity == "LEU":
-        atoms = ["CD1", "CD2", "CG"]
-    elif sc_residue_identity == "LYS":
-        atoms = ["NZ", "CE", "CD"]
-    elif sc_residue_identity == "MET":
-        atoms = ["CE", "SD", "CG"]
-    elif sc_residue_identity == "PHE":
-        atoms = ["CD1", "CD2", "CZ"]
-    elif sc_residue_identity == "PRO":
-        atoms = ["CD", "CG", "CB"]
-    elif sc_residue_identity == "SER":
-        atoms = ["OG", "CB", "CA"]
-    elif sc_residue_identity == "THR":
-        atoms = ["OG1", "CG2", "CB"]
-    elif sc_residue_identity == "TRP":
-        atoms = ["NE1", "CZ3", "CG"]
-    elif sc_residue_identity == "TYR":
-        atoms = ["CE1", "CE2", "OH"]
-    elif sc_residue_identity == "THR":
-        atoms = ["CG1", "CG2", "CB"]
-    else:
+    func_groups = {
+        "ALA": ["CB", "CA", "N"],
+        "ARG": ["NH1", "NH2", "CZ"],
+        "ASP": ["OD1", "OD2", "CG"],
+        "ASN": ["OD1", "ND2", "CG"],
+        "CYS": ["SG", "CB", "CA"],
+        "GLU": ["OE1", "OE2", "CD"],
+        "GLN": ["OE1", "NE2", "CD"],
+        "GLY": ["CA", "N", "C"],
+        "HIS": ["ND1", "NE2", "CG"],
+        "ILE": ["CD1", "CG1", "CB"],
+        "LEU": ["CD1", "CD2", "CG"],
+        "LYS": ["NZ", "CE", "CD"],
+        "MET": ["CE", "SD", "CG"],
+        "PHE": ["CD1", "CD2", "CZ"],
+        "PRO": ["CD", "CG", "CB"],
+        "SER": ["OG", "CB", "CA"],
+        "THR": ["OG1", "CG2", "CB"],
+        "TRP": ["NE1", "CZ3", "CG"],
+        "TYR": ["CE1", "CE2", "OH"],
+        "VAL": ["CG1", "CG2", "CB"]
+        }
+    if not sc_residue_identity in func_groups:
         raise RuntimeError(f'Unknown residue with name {sc_residue_identity}!')
-    res_atoms = []
-    for atom in atoms:
-        res_atoms.append(residue[atom])
-    return res_atoms
+    else:
+        return [residue[atom] for atom in func_groups[sc_residue_identity]]
 
 def align_to_sidechain(entity, entity_residue_to_align, sidechain, flip_symmetric:bool=True, flip_histidines:bool=False, his_central_atom:str="NE2"):
     '''
