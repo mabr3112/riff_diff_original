@@ -80,7 +80,7 @@ def write_fastdesign_opts(row: pd.Series, cycle: int, total_cycles: int, referen
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
     return f"-in:file:native {row[reference_location_col]} -parser:script_vars motif_res={collapse_dict_values(row[motif_res_col])} cat_res={collapse_dict_values(row[cat_res_col])} input_res={collapse_dict_values(row[designres_col])} substrate_chain={args.ligand_chain} sd={0.8 - (0.4 * cycle/total_cycles)} resfile={row[resfile_col]}"
 
-def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues", disfavor_alanines:int=1):
+def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues", disfavor_alanines:int=1, calc_perplexity=False):
     '''AAA'''
     # Run MPNN and filter (by half)
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues", use_soluble_model=use_soluble_model)
@@ -93,6 +93,7 @@ def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inp
     mpnn_seqfilter = poses.filter_poses_by_score(num_esm_inputs, f"{prefix}_mpnn_compscore", prefix=f"{prefix}_mpnn_seqfilter", remove_layers=1, plot=[f"{prefix}_mpnn_score", f"{prefix}_alanine_content"])
 
     # Run ESMFold and calc bb_ca_rmsd, motif_ca_rmsd and motif_heavy RMSD
+    if calc_perplexity: esm_singlepass_logprobs = poses.calc_esm2_pseudo_perplexity(options="--singlepass True", prefix=f"round1_singlepass", max_cores=1000)
     esm_preds = poses.predict_sequences(run_ESMFold, prefix=f"{prefix}_esm")
     esm_bb_ca_rmsds = poses.calc_bb_rmsd_df(ref_pdb=bb_rmsd_col, metric_prefix=f"{prefix}_esm")
     esm_motif_rmsds = poses.calc_motif_bb_rmsd_df(ref_pdb=motif_ref_pdb_col, ref_motif=ref_motif_col, target_motif=motif_col, metric_prefix=f"{prefix}_esm_bb_ca")
@@ -100,7 +101,6 @@ def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inp
 
     # Filter Redesigns based on confidence and RMSDs
     esm_comp_score = poses.calc_composite_score(f"{prefix}_esm_comp_score", [f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_motif_rmsd"], [-1, rmsd_weight])
-    if args.calc_perplexity: esm_singlepass_logprobs = poses.calc_esm2_pseudo_perplexity(options="--singlepass True", prefix=f"round1_singlepass", max_cores=1000)
     esm_filter = poses.filter_poses_by_score(num_esm_outputs_per_input_backbone, f"{prefix}_esm_comp_score", remove_layers=1, prefix=f"{prefix}_esm_filter", plot=[f"{prefix}_esm_comp_score", f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_rmsd", f"{prefix}_esm_bb_ca_motif_rmsd", f"{prefix}_esm_catres_motif_heavy_rmsd"])
     
     # Plot Results
@@ -394,7 +394,7 @@ def main(args):
 
     # filter based on ligand_contacts:
     rfdiff_pocket_comp_score = ensembles.calc_composite_score(f"pocket_comp_score", ["rfdiffusion_pocket_score_v2", "rfdiffusion_peratom_ligand_contacts"], [-1, 1])
-    rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.95, "pocket_comp_score", prefix="rfdiffusion_pocket_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
+    rfdiff_contacts_filter = ensembles.filter_poses_by_score(0.95, "pocket_comp_score", prefix="rfdiffusion_pocket_filter", ascending=True, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
 
     # remove structures with template RMSDs > 1
     ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["rfdiffusion_template_bb_ca_motif_rmsd"] <= 1]
@@ -421,12 +421,12 @@ def main(args):
     if keep_ligand_chain: calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="pre_esm", ligand_chain=args.ligand_chain)
 
     # filter down by total_score to max_esm_inputs:
-    pre_mpnn_comp_score = ensembles.calc_composite_score("pre_esm_comp_score", [f"{cycle_prefix}_fr_total_score", f"pre_esm_pocket_score_v2", f"pre_esm_ligand_contacts", f"rfdiffusion_rog"], [1, -1, 1, 1])
-    total_score_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, f"pre_esm_comp_score", prefix=f"pre_mpnn_filter", plot=["pre_esm_peratom_ligand_contacts", f"{cycle_prefix}_fr_total_score", f"{cycle_prefix}_fr_bb_ca_motif_rmsd", f"pre_esm_pocket_score", f"pre_esm_pocket_score_v2", f"pre_esm_pocket_score_v3"])
+    pre_mpnn_comp_score = ensembles.calc_composite_score("pre_esm_comp_score", [f"{cycle_prefix}_fr_total_score", f"pre_esm_pocket_score_v2", f"pre_esm_peratom_ligand_contacts", f"rfdiffusion_rog"], [1, -1, 1, 1])
+    total_score_filter = ensembles.filter_poses_by_score(args.num_mpnn_inputs, f"pre_esm_comp_score", prefix=f"pre_mpnn_filter", plot=["pre_esm_peratom_ligand_contacts", f"{cycle_prefix}_fr_total_score", f"{cycle_prefix}_fr_bb_ca_motif_rmsd", f"pre_esm_pocket_score", f"pre_esm_pocket_score_v2", f"pre_esm_pocket_score_v3", f"rfdiffusion_rog"])
 
     ######################### ROUND1 ESMFold ###############################################
     # run mpnn and predict with ESMFold:
-    ensembles = mpnn_design_and_esmfold(ensembles, prefix="round1", num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_col=f"{cycle_prefix}_fr_location", motif_ref_pdb_col="updated_reference_frags_location", disfavor_alanines=1)
+    ensembles = mpnn_design_and_esmfold(ensembles, prefix="round1", num_mpnn_seqs=args.num_mpnn_seqs, num_esm_inputs=args.num_esm_inputs, num_esm_outputs_per_input_backbone=args.num_esm_outputs_per_input_backbone, bb_rmsd_col=f"{cycle_prefix}_fr_location", motif_ref_pdb_col="updated_reference_frags_location", disfavor_alanines=1, calc_perplexity=True)
 
     # superimpose poses on reference frags and calculate ligand scores:
     if keep_ligand_chain: 
@@ -435,7 +435,7 @@ def main(args):
 
     # Filter down to final set of .pdbs that will be input for Rosetta Refinement:
     #scoreterms, weights = parse_outfilter_args(args.output_scoreterms, args.output_scoreterm_weights, ensembles.poses_df, prefix="round1")
-    out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", (st := [f"round1_esm_plddt", f"round1_esm_bb_ca_motif_rmsd", f"post_esm_pocket_score_v2", f"post_esm_ligand_contacts"]), [-0.75,1.5,-0.75,0.75])
+    out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", (st := [f"round1_esm_plddt", f"round1_esm_bb_ca_motif_rmsd", f"post_esm_pocket_score_v2", f"post_esm_peratom_ligand_contacts"]), [-0.75,1.5,-0.75,0.75])
     out_filter = ensembles.filter_poses_by_score(args.num_refinement_inputs, f"out_filter_comp_score", prefix="out_filter", plot=st)
     results_dir = f"{args.output_dir}/intermediate_results/"
     ref_frag_dir = f"{results_dir}/ref_fragments/"
