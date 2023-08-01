@@ -359,6 +359,12 @@ def main(args):
     # RFdiffusion:
     diffusion_options = f"diffuser.T={str(args.rfdiffusion_timesteps)} potentials.guide_scale={args.rfdiff_guide_scale} inference.num_designs={args.num_rfdiffusions} potentials.guiding_potentials=[\\'type:substrate_contacts,weight:0\\',\\'type:substrate_contacts_positive,weight:{args.pot_weight},pos_weight:{args.pos_weight},attr_dist:{args.attr_dist},decentralize:{args.decentralize}\\'] potentials.guide_decay={args.guide_decay}"
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
+
+    # if custom center should be added:
+    if args.custom_diffusion_center.upper() == "True":
+        c_x, c_y, c_z = ensembles.poses_df.loc[0, "diffusion_custom_center"].split(",")
+        diffusion_options.replace(",decentralize", f",rc_x:{c_x},rc_y:{c_y},rc_z:{c_z},decentralize")
+
     ensembles.poses_df["rfdiffusion_pose_opts"] = [x.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ") for x in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
 
@@ -585,6 +591,7 @@ if __name__ == "__main__":
     argparser.add_argument("--guide_decay", type=str, default="quadratic", help="potential decay for RFdiffusion")
     argparser.add_argument("--attr_dist", type=float, default=0, help="weight of the potential")
     argparser.add_argument("--decentralize", type=float, default=2, help="Set this value higher if you want your substrate more buried.")
+    argparser.add_argument("--custom_diffusion_center", type=str, default="False", help="Do you want to use a custom center for diffusion?")
 
     # linkers
     argparser.add_argument("--flanking", type=str, default="split", help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")

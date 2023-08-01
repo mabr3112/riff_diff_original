@@ -631,6 +631,23 @@ def write_residue_identities_to_json(input_df: pd.DataFrame, fragments_dict: dic
         json.dump(out_dict, f)
     return out_dict
 
+def parse_atom_identifier(atom_identifier: str) -> tuple[str]:
+    '''parses an atom identifier PDB-chain, PDB-resnum, PDB-atom-name [A5CO]'''
+    pattern = r"([a-zA-Z])(\d+)([a-zA-Z]+)"
+    result = re.match(pattern, atom_identifier)
+    return result.group(1), result.group(2), result.group(3)
+
+def get_custom_center_from_theozyme(input_theozyme, atom_identifier: str):
+    '''Collects coordinates of custom center for RFdiffusion given an atom identifier (PDB chain name, resnum and atom name).
+    Example atom identifier PDB-chain (A), PDB-resnum (5), PDB-atom-name (CO): "A5CO"'''
+    chain, resnum, atom_name = parse_atom_identifier(atom_identifier)
+    tz = load_structure_from_pdbfile(input_theozyme)
+    try: 
+        return ",".join([str(x) for x in tz[chain][(" ", int(resnum), " ")][atom_name].coord])
+    except KeyError:
+        raise KeyError(f"Atom with identifiers chain={chain}, resnum={resnum}, atom_name={atom_name}, was not found in the theozyme at {input_theozyme}")
+    
+
 def main(args):
     ### Code ####
     if not os.path.isdir(args.output_dir): os.makedirs(args.output_dir, exist_ok=True)
@@ -961,6 +978,10 @@ def main(args):
     
     selected_path_df = selected_path_df.join([pd.DataFrame.from_dict(output_datadict)])
 
+    # if custom center was set, add option to DataFrame:
+    if args.custom_diffusion_center:
+        center_str = get_custom_center_from_theozyme(args.input_theozyme, args.custom_diffusion_center)
+        selected_path_df["diffusion_custom_center"] = [center_str for row in selected_path_df.index]
 
     # store selected paths DataFrame
     scores_path = f"{args.output_dir}/selected_paths.json"
@@ -975,6 +996,7 @@ if __name__ == "__main__":
 
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argparser.add_argument("--input_json", type=str, required=True, help="File containing the .json input file located in the same directory as the .pdb files that are linked to it. (Output Directory of Fragment Generation)")
+    argparser.add_argument("--input_theozyme", type=str, required=True, help="Path to the theozyme .pdb file that was used as input for the backbone rotamer finder.")
     argparser.add_argument("--output_dir", type=str, required=True, help="Path to the output directory where the .pdb files and options for inpainting should be written to.")
     
     # PDB Options
@@ -983,6 +1005,7 @@ if __name__ == "__main__":
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="PDB letter for Ligand chain. The ligand will be used as substrate during diffusion.")
     argparser.add_argument("--add_channel", type=str, default="/home/mabr3112/riff_diff/utils/helix_cone_long.pdb", help="If specified, adds the structure specified to the fragment to be used as a 'substrate channel' during diffusion. IMPORTANT!!!  Channel pdb-chain name has to be 'Q' ")
     argparser.add_argument("--auto_superimpose_channel", type=str, default="True", help="Set to false, if you want to copy the channel pdb-chain from the reference file without superimposing on moitf-substrate centroid axis.")
+    argparser.add_argument("--custom_diffusion_center", type=str, default=None, help="Chain name, PDB residue-number, and atom name of atom that should be used as a custom center of mass during rfdiffusion.")
 
     # Filter Options
     argparser.add_argument("--max_linker_length", type=int, default=10, help="Maximum length of linkers that the fragments should be connected with.")
@@ -993,8 +1016,8 @@ if __name__ == "__main__":
     argparser.add_argument("--sample_from_subset_fraction", type=float, default=0.2, help="Take random sample from top <subset> rows of DataFrame.")
 
     # Structure Quality
-    argparser.add_argument("--plddt_threshold", type=float, default=0.85, help="Threshold for filtering inpaint plddts during quality-score calculation")
-    argparser.add_argument("--rmsd_threshold", type=float, default=0.2, help="Threshold tolerance for RMSD during quality-score calculation")
+    argparser.add_argument("--plddt_threshold", type=float, default=0.0, help="Threshold for filtering inpaint plddts during quality-score calculation")
+    argparser.add_argument("--rmsd_threshold", type=float, default=5, help="Threshold tolerance for RMSD during quality-score calculation")
     argparser.add_argument("--rmsd_strength", type=float, default=1, help="Strength for RMSD filtering if RMSD is above the Threshold. For quality-score calculation")
 
     # logging:
