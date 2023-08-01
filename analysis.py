@@ -15,12 +15,12 @@ import copy
 from Bio.PDB import *
 
 import sys
-#sys.path += ["/home/mabr3112/projects/iterative_refinement/"]
+sys.path += ["/home/mabr3112/projects/iterative_refinement/"]
 #sys.path += ["/home/tripp/riffdiff2/riff_diff/it_test/"]
 sys.path.append("/home/mabr3112/riff_diff")
 
 import utils.adrian_utils as my_utils
-import rfdiffusion_and_refinement as diffrf
+#import rfdiffusion_and_refinement as diffrf
 # import custom modules
 from iterative_refinement import *
 import utils.plotting as plots
@@ -175,9 +175,7 @@ def main(args):
     xml = os.path.abspath(args.protocol)
 
     df = pd.read_json(args.json)
-    #df = df[df['poses'].str.contains('A12-D7-C34-B14')]
-    #TODO: add a filter for input pdbs here
-    #if args.filter_input:
+
     analysis = Poses(args.output_dir, df['poses'].to_list())
 
     input_dir = f'{args.output_dir}/input_pdbs/'
@@ -188,10 +186,6 @@ def main(args):
     #merge pose dataframes
     analysis.poses_df = analysis.poses_df.drop(['input_poses', 'poses'], axis=1).merge(df, on='poses_description', how='left')
 
-    analysis.poses_df = analysis.poses_df[analysis.poses_df["post_cm_ligand_clash"] == False]
-    print(f'{len(analysis.poses_df.index)} input poses passed ligand clash filter.')
-    analysis.poses_df = analysis.poses_df[analysis.poses_df['post_cm_site_score'] >= args.sitescore_cutoff]
-    print(f'{len(analysis.poses_df.index)} input poses passed site score filter.')
 
     options_list = []
     pose_list = []
@@ -205,6 +199,8 @@ def main(args):
         cat_res = chainresdict_to_str(row['fixed_residues'])
         motif_res = chainresdict_to_str(row['motif_residues'])
         options = f"-parser:script_vars cat_res={cat_res} motif_res={motif_res} -in:file:native {row['updated_reference_frags_location']}"
+        if 'params_file_path' in analysis.poses_df.columns:
+            options = options + f" -extra_res_fa {os.path.abspath(row['params_file_path'])}"
         options_list.append(options)
         pose_list.append(pose_path)
 
@@ -212,11 +208,10 @@ def main(args):
     analysis.poses_df['analysis_options'] = options_list
     analysis.poses_df['poses'] = pose_list
     #add LINK records if covalent bonds are present
-    print(analysis.poses_df.columns)
     if 'covalent_bonds' in analysis.poses_df.columns:
-        if not (analysis.poses_df['covalent_bonds'].str.strip() == "").any():
-            print('Covalent bonds present! Adding LINK records to poses...')
-            analysis.add_LINK_to_poses('covalent_bonds', 'analysis')
+        logging.info('Covalent bonds present! Adding LINK records to poses...')
+        print('Covalent bonds present! Adding LINK records to poses...')
+        analysis.add_LINK_to_poses('covalent_bonds', 'rm_rx')
 
 
     opts = f"-parser:protocol {xml}"
