@@ -362,8 +362,13 @@ def main(args):
 
     # if custom center should be added:
     if args.custom_diffusion_center.upper() == "True":
+        # from dataframe (added during run_ensemble_evaluator.py)
         c_x, c_y, c_z = ensembles.poses_df.loc[0, "diffusion_custom_center"].split(",")
-        diffusion_options.replace(",decentralize", f",rc_x:{c_x},rc_y:{c_y},rc_z:{c_z},decentralize")
+        diffusion_options = diffusion_options.replace(",decentralize", f",rc_x:{c_x},rc_y:{c_y},rc_z:{c_z},decentralize")
+    elif len(args.custom_diffusion_center.split(",")) == 3:
+        # from commandline by specifying coordinates:
+        c_x, c_y, c_z = args.custom_diffusion_center.split(",")
+        diffusion_options = diffusion_options.replace(",decentralize", f",rc_x:{c_x},rc_y:{c_y},rc_z:{c_z},decentralize")
 
     ensembles.poses_df["rfdiffusion_pose_opts"] = [x.replace("contigmap.contigs=[", f"contigmap.contigs=[{args.channel_contig}/0 ") for x in ensembles.poses_df["rfdiffusion_pose_opts"].to_list()]
     diffusions = ensembles.rfdiffusion(options=diffusion_options, pose_options=list(ensembles.poses_df["rfdiffusion_pose_opts"]), prefix="rfdiffusion", max_gpus=args.max_rfdiffusion_gpus)
@@ -526,11 +531,14 @@ def main(args):
     sc_rmsd_opts = "-parser:protocol /home/mabr3112/riff_diff/rosetta/fastrelax_rmsdcheck.xml -beta"
     ensembles = calculate_fastrelax_sidechain_rmsd(ensembles, prefix="post_refinement_rmsdcheck", options=sc_rmsd_opts, sidechain_residues="fixed_residues", sidechain_ref_pdb_col="updated_reference_frags_location", n=15, pose_options=None)
 
+    # check calculate catres RMSD:
+    check_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix="check_postrelax_catres")
+
     # plot af2_stats:
-    cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_rmsd", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_fr_sap_score"]
-    titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "Relax \n Sidechain RMSD", "SAP Score"]
-    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "SAP Score [AU]"]
-    dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,5), (0,5), (0,150)]
+    cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_rmsd", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_fr_sap_score", "check_postrelax_catres_motif_heavy_rmsd"]
+    titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "Relax Min.\n Sidechain RMSD", "SAP Score", "check RMSD"]
+    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "SAP Score [AU]", "RMSD [\u00C5]"]
+    dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,5), (0,5), (0,150), (0,5)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plot_dir}/af2_stats.png")
     
     # superimpose poses on reference frags and calculate ligand scores:
@@ -539,12 +547,12 @@ def main(args):
         lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"final_redesign_lig_poses")
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_refinement", ligand_chain=args.ligand_chain)
 
-    print(len(ensembles.poses_df))
+    #print(len(ensembles.poses_df))
 
     # remove any structures that have an AF2 pLDDT below 85, Ca RMSD > 1
     #ensembles.poses_df = ensembles.poses_df[(ensembles.poses_df["af2_top_plddt"] <= 85) & (ensembles.poses_df["af2_bb_ca_rmsd"] <= 1) & (ensembles.poses_df["af2_bb_ca_motif_rmsd"] <= 1.5)]
 
-    print(len(ensembles.poses_df))
+    #print(len(ensembles.poses_df))
 
     # final backbone downsampling
     final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.5])
