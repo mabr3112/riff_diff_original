@@ -1,0 +1,39 @@
+<ROSETTASCRIPTS>
+	This Script is the prototype to dock Ligands into the PylRS binding pocket using GALigandDock.
+	IMPORTANT: when running, add the flag -beta to the command-line.
+	<SCOREFXNS>
+		<ScoreFunction name="beta_genpot" weights="beta_genpot"/> 
+		<ScoreFunction name="beta" weights="beta"/>
+		<ScoreFunction name="dockscore" weights="beta">
+    			<Reweight scoretype="fa_rep" weight="0.2"/>
+    			<Reweight scoretype="coordinate_constraint" weight="0.1"/>
+  		</ScoreFunction>
+  		<ScoreFunction name="relaxscore" weights="beta_cart"/>
+	</SCOREFXNS>
+	<RESIDUE_SELECTORS>
+		<Chain name="ligchain" chains="%%ligchain%%"/>
+	</RESIDUE_SELECTORS>
+	<JUMP_SELECTORS>
+      		<JumpIndex name="jump1" jump="1"/>
+  	</JUMP_SELECTORS>
+	<PACKER_PALETTES>
+	</PACKER_PALETTES>
+	<TASKOPERATIONS>
+	</TASKOPERATIONS>
+	<MOVE_MAP_FACTORIES>
+	</MOVE_MAP_FACTORIES>
+	<SIMPLE_METRICS>
+	</SIMPLE_METRICS>
+	<FILTERS>
+	</FILTERS>
+	<MOVERS>
+		<PyMOLMover name="pmm" keep_history="1" />
+		<GALigandDock name="dock" runmode="VSH" scorefxn="dockscore" scorefxn_relax="relaxscore" />
+		<InterfaceScoreCalculator name="RMSD_IF_energy" chains="A,%%ligchain%%" scorefxn="beta_genpot" />
+	</MOVERS>
+	<PROTOCOLS>
+		<Add mover_name="dock" />
+		<Add mover_name="RMSD_IF_energy" />
+	</PROTOCOLS>
+	<OUTPUT scorefxn="beta" />
+</ROSETTASCRIPTS>
