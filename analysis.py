@@ -209,7 +209,6 @@ def main(args):
     analysis.poses_df['poses'] = pose_list
     #add LINK records if covalent bonds are present
     if 'covalent_bonds' in analysis.poses_df.columns:
-        logging.info('Covalent bonds present! Adding LINK records to poses...')
         print('Covalent bonds present! Adding LINK records to poses...')
         analysis.add_LINK_to_poses('covalent_bonds', 'rm_rx')
 
@@ -239,9 +238,12 @@ def main(args):
     row_list = []
     for input, df in analysis.poses_df.groupby('analysis_input_poses_description', sort=False):
         analysis_dict = {}
-        for i in ['poses', 'analysis_input_poses', 'analysis_ligand_rmsd', 'analysis_catres_motif_heavy_rmsd', 'analysis_catres_bb_motif_rmsd', 'analysis_bb_ca_rmsd', 'analysis_total_score', 'analysis_rotprob', 'analysis_lig_shape_comp', 'analysis_lig_delta_sasa', 'analysis_interaction_energy', 'analysis_sasa', 'analysis_sap_score']:
+        for i in ['poses', 'analysis_input_poses', 'analysis_ligand_rmsd', 'analysis_catres_motif_heavy_rmsd', 'analysis_catres_bb_motif_rmsd', 'analysis_bb_ca_rmsd', 'analysis_total_score', 'analysis_rotprob', 'analysis_interaction_energy', 'analysis_sasa', 'analysis_sap_score']:
             analysis_dict[i] = df[i].to_list()
+        for i in ['analysis_ligand_rmsd', 'analysis_catres_motif_heavy_rmsd', 'analysis_catres_bb_motif_rmsd', 'analysis_bb_ca_rmsd', 'analysis_total_score', 'analysis_rotprob', 'analysis_interaction_energy', 'analysis_sasa', 'analysis_sap_score']:
+            analysis_dict[f"{i}_mean"] = df[i].mean()
         analysis_dict['analysis_rotprob'] = [abs(rot_prob) for rot_prob in analysis_dict['analysis_rotprob']]
+        analysis_dict['analysis_rotprob_mean'] = abs(analysis_dict['analysis_rotprob_mean'])
         row = pd.Series(analysis_dict)
         row.rename({'poses': 'analysis_relaxed_poses'}, inplace=True)
         row['poses_description'] = input
@@ -250,7 +252,7 @@ def main(args):
     #create new dataframe and merge with old one
     new_df = pd.DataFrame(row_list)
     analysis.poses_df = new_df.merge(old_poses.poses_df, on='poses_description')
-
+    analysis.poses_df[['poses_description', "cm_predictions_af2_top_plddt", "post_cm_af2_bb_motif_rmsd", "post_cm_attn_catres_motif_heavy_rmsd", "post_cm_af2_motif_site_score", "post_cm_attn_catres_site_score", "esm_catres_site_score", "esm_motif_site_score", 'esm_bb_motif_rmsd', 'esm_catres_rmsd', 'af2_esm_combined_catres_sitescore', 'analysis_ligand_rmsd_mean', 'analysis_catres_motif_heavy_rmsd_mean', 'analysis_catres_bb_motif_rmsd_mean', 'analysis_bb_ca_rmsd_mean', 'analysis_total_score_mean', 'analysis_rotprob_mean', 'analysis_lig_delta_sasa_mean', 'analysis_interaction_energy_mean', 'analysis_sasa_mean', 'analysis_sap_score_mean']].to_csv(os.path.join(args.output_dir, "analysis_results.csv"))
 
 
     #TODO: filter dataframe --> only output best structures, otherwise it will get overwhelming

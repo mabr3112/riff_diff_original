@@ -157,6 +157,12 @@ def statsfile_to_df(statsfile: str):
     return(df_scores)
 
 def statsfiles_to_json(input_dir: str, description:str, filename):
+
+    if os.path.isfile(filename):
+        with open(filename) as json_file:
+            print(f"Read structdict from file {filename}")
+            structdict = json.load(json_file)
+            return(structdict)
     #gathers all coupled-moves statsfiles and converts to a single dictionary
     statsfiles = []
     resfiles = []
@@ -301,12 +307,13 @@ def prepare_coupled_moves_relax_mpnn(output_dir, working_dir, cm_resultsdir, pos
 
 def convert_af2_perresidue_plddt_to_list(df, perresidue_plddt_column):
     perresidue_plddts = df[perresidue_plddt_column].to_list()
+    print(perresidue_plddts)
     perresidue_plddts = [list(i.values()) for i in perresidue_plddts]
     return perresidue_plddts
 
 def filter_input_poses(poses, perresidue_plddt_column, ligand_chain, sitescore_cutoff, max_input_per_backbone, output_dir, database, bb_clash_vdw_multiplier):
 
-    poses = clash_detection(poses=poses, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="pre_cm", ligand_chain=ligand_chain, database_dir=database, bb_clash_vdw_multiplier=bb_clash_vdw_multiplier, save_path_list=[os.path.join(output_dir, description + '.pdb') for description in poses.poses_df['poses_description'].to_list()])
+    poses = clash_detection(poses=poses, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="pre_cm", ligand_chain=ligand_chain, database_dir=database, bb_clash_vdw_multiplier=bb_clash_vdw_multiplier, save_path_list=None)
     poses.poses_df = poses.poses_df[poses.poses_df["pre_cm_ligand_clash"] == False]
 
     poses.calc_motif_bb_rmsd_df('updated_reference_frags_location', 'motif_residues', 'motif_residues', 'pre_cm_bb', ['N', 'CA', 'C', 'O'])
@@ -512,7 +519,49 @@ def create_reduced_motif(fixed_res:dict, motif_res:dict):
                 reduced_motif.append(i)
         reduced_dict[chain] = reduced_motif
     return reduced_dict
+
+def update_sitescore_with_bb_plddts(poses, sitescore_column, bb_plddt_column, motif_residue_column, prefix):
+
+    pose_motif_list = parse_pose_options(motif_residue_column, poses.poses_df)
+    perresidue_plddt_list = parse_pose_options(bb_plddt_column, poses.poses_df)
+
+    metric_name = f"{prefix}_sc_bb_site_score"
+
+    if os.path.isfile((scorefile := f"{poses.scores_dir}/{metric_name}_scores.json")):
+        print(f"Site score found at {scorefile} Reading scores directly from file.")
+        site_score_df = pd.read_json(scorefile)
+        poses.poses_df = poses.poses_df.merge(site_score_df, on="poses_description")
+        if len(poses.poses_df) == 0: raise ValueError("ERROR: Length of DataFrame = 0. DataFrame merging failed!")
+        site_score = list(poses.poses_df[metric_name])
+    else:
+        cat_res_pos = []
+        for resdict in pose_motif_list:
+            cat_res_pos.append(list(resdict.values())[0])
+        cat_res_av_plddt = []
+        for resposlist, plddtlist in zip(cat_res_pos, perresidue_plddt_list):
+            plddts = [plddtlist[resnum - 1] for resnum in resposlist]
+            cat_res_av_plddt.append(sum(plddts) / len(plddts))
+        site_score = [score * av_residue_plddt / 100 for av_residue_plddt, score in zip(cat_res_av_plddt, poses.poses_df[sitescore_column].to_list())]
     
+    pd.DataFrame({"poses_description": list(poses.poses_df["poses_description"]), metric_name: site_score}).to_json(scorefile)
+    poses.poses_df.loc[:, metric_name] = site_score
+
+    poses.poses_df.to_json(poses.scorefile)
+
+    return poses
+
+def save_top_poses(poses, cycle_num, output_dir):
+    
+
+    top_df = poses.poses_df[["poses", "poses_description", "input_description", f"cycle_{cycle_num}_attn_sc_bb_site_score", f"cycle_{cycle_num}_post_cm_esm_motif_site_score", f'cycle_{cycle_num}_post_cm_esm_bb_motif_rmsd', f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd', 'updated_reference_frags_location', 'motif_residues', 'fixed_residues', 'covalent_bonds']].copy()
+    if 'params_file_path' in poses.poses_df.columns:
+        top_df['params_file_path'] = poses.poses_df['params_file_path'].copy()
+        
+    top_df['cycle'] = cycle_num
+    top_df.rename(columns={f"cycle_{cycle_num}_attn_sc_bb_site_score": "esm_catres_site_score", f"cycle_{cycle_num}_post_cm_esm_motif_site_score": "esm_motif_site_score", f'cycle_{cycle_num}_post_cm_esm_bb_motif_rmsd': "esm_bb_motif_rmsd", f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd': "esm_catres_rmsd"}, inplace=True)
+    top_df.to_json(os.path.join(output_dir, f"cycle_{cycle_num}_top.json"))
+
+    return top_df
 
 
 def main(args):
@@ -558,7 +607,9 @@ def main(args):
         coupled_moves.poses_df['original_motif'] = coupled_moves.poses_df['motif_residues'].copy()
         coupled_moves.poses_df['motif_residues'] = coupled_moves.poses_df.apply(lambda row: create_reduced_motif(row['fixed_residues'], row['motif_residues']), axis=1)
 
-
+    original_poses = copy.deepcopy(coupled_moves)
+    print(coupled_moves.poses_df['params_file_path'])
+    
     #Use alphafold plddt of final prediction for site score
     coupled_moves = filter_input_poses(coupled_moves, f'af2_top_plddt_list', args.ligand_chain, args.sitescore_cutoff, args.max_input_per_backbone, input_dir, args.database_dir, args.bb_clash_vdw_multiplier)
     logging.info(f'{len(coupled_moves.poses_df.index)} input poses passed ligand clash filter.')
@@ -606,6 +657,11 @@ def main(args):
     if args.relax_options:
         rx_opts = rx_opts + ' ' + args.relax_options
         pre_cm_rx_opts = pre_cm_rx_opts + ' ' + args.relax_options
+
+    best_per_cycle_dir = os.path.join(args.output_dir, "best_per_cycle")
+    os.makedirs(best_per_cycle_dir, exist_ok=True)
+
+    
 
 
     ######################## COUPLED MOVES, MPNN, ESMFOLD, ATTN REFINEMENT ########################
@@ -687,20 +743,21 @@ def main(args):
         coupled_moves.poses_df.to_json(coupled_moves.scorefile)
         
         #filter predictions below plddt cutoff & clashing predictions
-        initial_length = len(coupled_moves.poses_df.index)
+        print(f'Filtering {len(coupled_moves.poses_df.index)} poses...')
+        logging.info(f'Filtering {len(coupled_moves.poses_df.index)} poses...')
         coupled_moves.poses_df = coupled_moves.poses_df[coupled_moves.poses_df[f"cycle_{cycle_num}_cm_predictions_esm_plddt"] > args.plddt_cutoff]
-        filtered_length = len(coupled_moves.poses_df.index)
-        print(f'{filtered_length} of {initial_length} passed plddt cutoff of {args.plddt_cutoff}.')
-        logging.info(f'{filtered_length} of {initial_length} passed plddt cutoff of {args.plddt_cutoff}.')
+        print(f'{len(coupled_moves.poses_df.index)} passed plddt cutoff of {args.plddt_cutoff}.')
+        logging.info(f'{len(coupled_moves.poses_df.index)} passed plddt cutoff of {args.plddt_cutoff}.')
         coupled_moves.poses_df = coupled_moves.poses_df[coupled_moves.poses_df[f"cycle_{cycle_num}_post_cm_esm_ligand_clash"] == False]
-        print(f'{len(coupled_moves.poses_df.index)} of {filtered_length} passed clash detection.')
-        logging.info(f'{len(coupled_moves.poses_df.index)} of {filtered_length} passed clash detection.')
+        print(f'{len(coupled_moves.poses_df.index)} passed clash detection.')
+        logging.info(f'{len(coupled_moves.poses_df.index)} passed clash detection.')
 
         #run attn, filter by sitescore and top poses per backbone
         coupled_moves = run_attn(coupled_moves, prefix=f"cycle_{cycle_num}_attn")
         coupled_moves.calc_motif_heavy_rmsd_df('updated_reference_frags_location', 'fixed_residues', 'fixed_residues', f'cycle_{cycle_num}_post_cm_attn_catres')
         coupled_moves.add_site_score(f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd', 'fixed_residues', f"cycle_{cycle_num}_attn_sc_plddts", f'cycle_{cycle_num}_post_cm_attn_catres')
-        coupled_moves.filter_poses_by_score(args.max_output_per_backbone, f"cycle_{cycle_num}_post_cm_attn_catres_site_score", remove_layers=4*cycle_num, ascending=False)
+        coupled_moves = update_sitescore_with_bb_plddts(coupled_moves, f"cycle_{cycle_num}_post_cm_attn_catres_site_score", f"cycle_{cycle_num}_cm_predictions_esm_perresidue_plddt", 'fixed_residues', f"cycle_{cycle_num}_attn")
+        coupled_moves.filter_poses_by_score(args.max_output_per_backbone, f"cycle_{cycle_num}_attn_sc_bb_site_score", remove_layers=4*cycle_num, ascending=False)
         logging.info(f'{len(coupled_moves.poses_df.index)} poses were selected for next round!')
         coupled_moves.poses_df.to_json(coupled_moves.scorefile)
 
@@ -712,7 +769,7 @@ def main(args):
         cycle_results = [shutil.copy(pose, cycle_resultsdir) for pose in coupled_moves.poses_df["poses"].to_list()]
 
         #create alignments and plots
-        utils.pymol_tools.pymol_alignment_scriptwriter(df=coupled_moves.poses_df, scoreterm=f'cycle_{cycle_num}_post_cm_esm_motif_site_score', top_n=len(coupled_moves.poses_df.index), path_to_script=f'{cycle_resultsdir}align.pml', ascending=False, pose_col='poses_description', ref_pose_col='input_poses', motif_res_col="motif_residues", fixed_res_col="fixed_residues", ref_motif_res_col="template_motif", ref_fixed_res_col="template_fixedres")
+        utils.pymol_tools.pymol_alignment_scriptwriter(df=coupled_moves.poses_df, scoreterm=f"cycle_{cycle_num}_attn_sc_bb_site_score", top_n=len(coupled_moves.poses_df.index), path_to_script=f'{cycle_resultsdir}align.pml', ascending=False, pose_col='poses_description', ref_pose_col='input_poses', motif_res_col="motif_residues", fixed_res_col="fixed_residues", ref_motif_res_col="template_motif", ref_fixed_res_col="template_fixedres")
         cols = [f'cycle_{cycle_num}_cm_predictions_esm_plddt', f'cycle_{cycle_num}_post_cm_esm_bb_motif_rmsd', f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd', f'cycle_{cycle_num}_post_cm_esm_motif_site_score', f'cycle_{cycle_num}_post_cm_attn_catres_site_score']
         titles = ["ESM-pLDDT", "ESM Motif RMSD", "ATTN Catres\nSidechain RMSD", "motif site score", "catres site score"]
         y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "AU", "AU"]
@@ -730,23 +787,15 @@ def main(args):
         
         coupled_moves.poses_df['poses'] = pose_list
         coupled_moves.poses_df.to_json(coupled_moves.scorefile)
-        
-        best_per_cycle_dir = os.path.join(args.output_dir, "best_per_cycle")
-        os.makedirs(best_per_cycle_dir, exist_ok=True)
-        top_df = coupled_moves.poses_df[["poses", "poses_description", "input_description", f"cycle_{cycle_num}_post_cm_attn_catres_site_score", f"cycle_{cycle_num}_post_cm_esm_motif_site_score", f'cycle_{cycle_num}_post_cm_esm_bb_motif_rmsd', f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd', 'updated_reference_frags_location', 'motif_residues', 'fixed_residues']].copy()
-        if 'params_file_path' in coupled_moves.poses_df.columns:
-            top_df['params_file_path'] = coupled_moves.poses_df['params_file_path'].copy()
-        
-        top_df['cycle'] = cycle_num
-        top_df.rename(columns={f"cycle_{cycle_num}_post_cm_attn_catres_site_score": "esm_catres_site_score", f"cycle_{cycle_num}_post_cm_esm_motif_site_score": "esm_motif_site_score", f'cycle_{cycle_num}_post_cm_esm_bb_motif_rmsd': "esm_bb_motif_rmsd", f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd': "esm_catres_rmsd"}, inplace=True)
-        top_df.to_json(os.path.join(best_per_cycle_dir, f"cycle_{cycle_num}_top.json"))
+
+        top_df = save_top_poses(coupled_moves, cycle_num, best_per_cycle_dir)
 
 
-    ######################## RUN PREDICTION ON PRESERVED SEQUENCES WITH CM-OPTIMIZATION ONLY (NO MPNN) ########################
+    ######################## RUN PREDICTION ON PRESERVED SEQUENCES WITH/WITHOUT CM-OPTIMIZATION ONLY (NO MPNN) ########################
 
 
     coupled_moves = preserved_poses
-    cycle_num = "preservation"
+    cycle_num = 0
     
     #predict coupled moves sequences, analyze output
     coupled_moves.predict_sequences(run_ESMFold, prefix=f"cycle_{cycle_num}_cm_predictions_esm")
@@ -757,25 +806,51 @@ def main(args):
     coupled_moves = clash_detection(poses=coupled_moves, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix=f"cycle_{cycle_num}_post_cm_esm", ligand_chain=args.ligand_chain, database_dir=args.database_dir, bb_clash_vdw_multiplier=args.bb_clash_vdw_multiplier, save_path_list=coupled_moves.poses_df['poses'].to_list())
 
     #filter predictions below plddt cutoff & clashing predictions
-    initial_length = len(coupled_moves.poses_df.index)
+    print(f'Filtering {len(coupled_moves.poses_df.index)} poses...')
+    logging.info(f'Filtering {len(coupled_moves.poses_df.index)} poses...')
     coupled_moves.poses_df = coupled_moves.poses_df[coupled_moves.poses_df[f"cycle_{cycle_num}_cm_predictions_esm_plddt"] > args.plddt_cutoff]
-    filtered_length = len(coupled_moves.poses_df.index)
-    print(f'{filtered_length} of {initial_length} passed plddt cutoff of {args.plddt_cutoff}.')
-    logging.info(f'{filtered_length} of {initial_length} passed plddt cutoff of {args.plddt_cutoff}.')
+    print(f'{len(coupled_moves.poses_df.index)} passed plddt cutoff of {args.plddt_cutoff}.')
+    logging.info(f'{len(coupled_moves.poses_df.index)} passed plddt cutoff of {args.plddt_cutoff}.')
     coupled_moves.poses_df = coupled_moves.poses_df[coupled_moves.poses_df[f"cycle_{cycle_num}_post_cm_esm_ligand_clash"] == False]
-    print(f'{len(coupled_moves.poses_df.index)} of {filtered_length} passed clash detection.')
-    logging.info(f'{len(coupled_moves.poses_df.index)} of {filtered_length} passed clash detection.')
+    print(f'{len(coupled_moves.poses_df.index)} passed clash detection.')
+    logging.info(f'{len(coupled_moves.poses_df.index)} passed clash detection.')
 
     #run attn, filter by sitescore and top poses per backbone
     coupled_moves = run_attn(coupled_moves, prefix=f"cycle_{cycle_num}_attn")
     coupled_moves.calc_motif_heavy_rmsd_df('updated_reference_frags_location', 'fixed_residues', 'fixed_residues', f'cycle_{cycle_num}_post_cm_attn_catres')
     coupled_moves.add_site_score(f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd', 'fixed_residues', f"cycle_{cycle_num}_attn_sc_plddts", f'cycle_{cycle_num}_post_cm_attn_catres')
-    coupled_moves.filter_poses_by_score(args.max_output_per_backbone, f"cycle_{cycle_num}_post_cm_attn_catres_site_score", remove_layers=3, ascending=False)
+    coupled_moves = update_sitescore_with_bb_plddts(coupled_moves, f"cycle_{cycle_num}_post_cm_attn_catres_site_score", f"cycle_{cycle_num}_cm_predictions_esm_perresidue_plddt", 'fixed_residues', f"cycle_{cycle_num}_attn")
+    coupled_moves.filter_poses_by_score(args.max_output_per_backbone, f"cycle_{cycle_num}_attn_sc_bb_site_score", remove_layers=3, ascending=False)
     
-    top_df = coupled_moves.poses_df[["poses", "poses_description", "input_description", f"cycle_{cycle_num}_post_cm_attn_catres_site_score", f"cycle_{cycle_num}_post_cm_esm_motif_site_score", f'cycle_{cycle_num}_post_cm_esm_bb_motif_rmsd', f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd', 'updated_reference_frags_location', 'motif_residues', 'fixed_residues']].copy()
-    top_df['cycle'] = cycle_num
-    top_df.rename(columns={f"cycle_{cycle_num}_post_cm_attn_catres_site_score": "esm_catres_site_score", f"cycle_{cycle_num}_post_cm_esm_motif_site_score": "esm_motif_site_score", f'cycle_{cycle_num}_post_cm_esm_bb_motif_rmsd': "esm_bb_motif_rmsd", f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd': "esm_catres_rmsd"}, inplace=True)
-    top_df.to_json(os.path.join(best_per_cycle_dir, f"cycle_{cycle_num}_top.json"))
+    top_df = save_top_poses(coupled_moves, cycle_num, best_per_cycle_dir)
+
+    ## repredict original input to get comparable data ##
+    cycle_num = -1
+    coupled_moves = original_poses
+    coupled_moves.predict_sequences(run_ESMFold, prefix=f"cycle_{cycle_num}_cm_predictions_esm")
+    coupled_moves.calc_motif_bb_rmsd_df('updated_reference_frags_location', 'motif_residues', 'motif_residues', f'cycle_{cycle_num}_post_cm_esm_bb', ['N', 'CA', 'C'])
+    coupled_moves.add_site_score(f'cycle_{cycle_num}_post_cm_esm_bb_motif_rmsd', 'motif_residues', f"cycle_{cycle_num}_cm_predictions_esm_perresidue_plddt", f'cycle_{cycle_num}_post_cm_esm_motif')
+    coupled_moves.calc_motif_heavy_rmsd_df('updated_reference_frags_location', 'fixed_residues', 'fixed_residues', f'cycle_{cycle_num}_post_cm_esm_catres')
+    coupled_moves.add_site_score(f'cycle_{cycle_num}_post_cm_esm_catres_motif_heavy_rmsd', 'fixed_residues', f"cycle_{cycle_num}_cm_predictions_esm_perresidue_plddt", f'cycle_{cycle_num}_post_cm_esm_catres')
+    coupled_moves = clash_detection(poses=coupled_moves, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix=f"cycle_{cycle_num}_post_cm_esm", ligand_chain=args.ligand_chain, database_dir=args.database_dir, bb_clash_vdw_multiplier=args.bb_clash_vdw_multiplier, save_path_list=coupled_moves.poses_df['poses'].to_list())
+    
+    #filter predictions below plddt cutoff & clashing predictions
+    print(f'Filtering {len(coupled_moves.poses_df.index)} poses...')
+    logging.info(f'Filtering {len(coupled_moves.poses_df.index)} poses...')
+    coupled_moves.poses_df = coupled_moves.poses_df[coupled_moves.poses_df[f"cycle_{cycle_num}_cm_predictions_esm_plddt"] > args.plddt_cutoff]
+    print(f'{len(coupled_moves.poses_df.index)} passed plddt cutoff of {args.plddt_cutoff}.')
+    logging.info(f'{len(coupled_moves.poses_df.index)} passed plddt cutoff of {args.plddt_cutoff}.')
+    coupled_moves.poses_df = coupled_moves.poses_df[coupled_moves.poses_df[f"cycle_{cycle_num}_post_cm_esm_ligand_clash"] == False]
+    print(f'{len(coupled_moves.poses_df.index)} passed clash detection.')
+    logging.info(f'{len(coupled_moves.poses_df.index)} passed clash detection.')
+
+    #run attn, filter by sitescore and top poses per backbone
+    coupled_moves = run_attn(coupled_moves, prefix=f"cycle_{cycle_num}_attn")
+    coupled_moves.calc_motif_heavy_rmsd_df('updated_reference_frags_location', 'fixed_residues', 'fixed_residues', f'cycle_{cycle_num}_post_cm_attn_catres')
+    coupled_moves.add_site_score(f'cycle_{cycle_num}_post_cm_attn_catres_motif_heavy_rmsd', 'fixed_residues', f"cycle_{cycle_num}_attn_sc_plddts", f'cycle_{cycle_num}_post_cm_attn_catres')
+    coupled_moves = update_sitescore_with_bb_plddts(coupled_moves, f"cycle_{cycle_num}_post_cm_attn_catres_site_score", f"cycle_{cycle_num}_cm_predictions_esm_perresidue_plddt", 'fixed_residues', f"cycle_{cycle_num}_attn")
+    
+    top_df = save_top_poses(coupled_moves, cycle_num, best_per_cycle_dir)
 
     ######################## ALPHAFOLD2 & ATTN ########################
 
@@ -810,8 +885,8 @@ def main(args):
     #filter af2 output
     initial_length = len(coupled_moves.poses_df.index)
     coupled_moves.poses_df = coupled_moves.poses_df[coupled_moves.poses_df["post_cm_af2_ligand_clash"] == False]
-    logging.info(f'{len(coupled_moves.poses_df.index)} of {filtered_length} passed clash detection.')
-    print(f'{len(coupled_moves.poses_df.index)} of {filtered_length} passed clash detection.')
+    logging.info(f'{len(coupled_moves.poses_df.index)} passed clash detection.')
+    print(f'{len(coupled_moves.poses_df.index)} passed clash detection.')
     coupled_moves.poses_df = coupled_moves.poses_df[coupled_moves.poses_df["cm_predictions_af2_top_plddt"] > args.plddt_cutoff]
     logging.info(f'{len(coupled_moves.poses_df.index)} passed plddt cutoff of {args.plddt_cutoff}.')
     print(f'{len(coupled_moves.poses_df.index)} passed plddt cutoff of {args.plddt_cutoff}.')
@@ -820,9 +895,12 @@ def main(args):
     coupled_moves = run_attn(coupled_moves, prefix=f"af2_attn")
     coupled_moves.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix="post_cm_attn_catres")
     coupled_moves.add_site_score('post_cm_attn_catres_motif_heavy_rmsd', 'fixed_residues', 'af2_attn_sc_plddts', 'post_cm_attn_catres')
-    
+    coupled_moves.poses_df['af2_perresidue_plddt_list'] = convert_af2_perresidue_plddt_to_list(coupled_moves.poses_df, 'cm_predictions_af2_top_plddt_list')
+    coupled_moves = update_sitescore_with_bb_plddts(coupled_moves, 'post_cm_attn_catres', 'af2_perresidue_plddt_list', 'fixed_residues', f"post_cm_attn")
+
+
     #filter output
-    coupled_moves.poses_df['af2_esm_combined_catres_sitescore'] = coupled_moves.poses_df["post_cm_attn_catres_site_score"] * coupled_moves.poses_df[f"esm_catres_site_score"]
+    coupled_moves.poses_df['af2_esm_combined_catres_sitescore'] = coupled_moves.poses_df["post_cm_attn_sc_bb_site_score"] * coupled_moves.poses_df[f"esm_catres_site_score"]
     coupled_moves.poses_df = pd.concat([df.sort_values("af2_esm_combined_catres_sitescore", ascending=False).head(args.max_output_per_backbone) for input_pdb, df in coupled_moves.poses_df.groupby("input_description")]).reset_index(drop=True)
     print(f'{len(coupled_moves.poses_df.index)} poses passed all filters.')
 
@@ -830,8 +908,7 @@ def main(args):
     af2_resultsdir = os.path.join(args.output_dir, 'af2_results/')
     os.makedirs(af2_resultsdir, exist_ok=True)
 
-    coupled_moves.poses_df[["poses_description", "cm_predictions_af2_top_plddt", "post_cm_af2_bb_motif_rmsd", "post_cm_attn_catres_motif_heavy_rmsd", "post_cm_af2_motif_site_score", "post_cm_attn_catres_site_score", f"esm_catres_site_score", f"esm_motif_site_score", f'esm_bb_motif_rmsd', f'esm_catres_rmsd', 'af2_esm_combined_catres_sitescore']].to_csv(f"{af2_resultsdir}/af2_results.csv")
-
+    coupled_moves.poses_df[["poses_description", "cm_predictions_af2_top_plddt", "post_cm_af2_bb_motif_rmsd", "post_cm_attn_catres_motif_heavy_rmsd", "post_cm_af2_motif_site_score", "post_cm_attn_catres_site_score", f"esm_catres_site_score", f"esm_motif_site_score", f'esm_bb_motif_rmsd', f'esm_catres_rmsd', 'af2_esm_combined_catres_sitescore']].sort_values('af2_esm_combined_catres_sitescore', ascending=False).to_csv(f"{af2_resultsdir}/af2_results.csv")
     #"post_cm_af2_esm_bb_ca_rmsd"
 
     ref_frags = [shutil.copy(ref_pose, af2_resultsdir) for ref_pose in coupled_moves.poses_df["updated_reference_frags_location"].to_list()]
@@ -845,6 +922,8 @@ def main(args):
     y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "AU", "AU"]
     dims = [(0,100), (0,5), (0,5), (0,1), (0,1)]
     _ = plots.violinplot_multiple_cols(coupled_moves.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{args.output_dir}/plots/post_cm.png")
+
+    coupled_moves.poses_df.to_json(coupled_moves.scorefile)
 
     logging.info("Done!")
 

@@ -980,8 +980,14 @@ def main(args):
 
     # if custom center was set, add option to DataFrame:
     if args.custom_diffusion_center:
-        center_str = get_custom_center_from_theozyme(args.input_theozyme, args.custom_diffusion_center)
-        selected_path_df["diffusion_custom_center"] = [center_str for row in selected_path_df.index]
+        # when coordinates are given, just copy coordinates
+        if len(args.custom_diffusion_center.split(",")) == 3:
+            selected_path_df["diffusion_custom_center"] = [args.custom_diffusion_center for row in selected_path_df.index]
+
+        # otherwise extract coordinates from specified atom by -atom_specifier-
+        else:
+            center_str = get_custom_center_from_theozyme(args.input_theozyme, args.custom_diffusion_center)
+            selected_path_df["diffusion_custom_center"] = [center_str for row in selected_path_df.index]
 
     # store selected paths DataFrame
     scores_path = f"{args.output_dir}/selected_paths.json"
