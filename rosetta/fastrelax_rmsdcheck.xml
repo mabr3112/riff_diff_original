@@ -22,6 +22,7 @@
 		<ResidueSummaryMetric metric="core_interaction_fa_atr" custom_type="core_res_fa_atr" action="mean"/>
 	</SIMPLE_METRICS>
 	<FILTERS>
+		<AtomicContactCount name="contacts" confidence="0"/> atomic density (c-c contacts) from fleishman paper
 	</FILTERS>
 	<MOVERS>
 		<PyMOLMover name="pmm" keep_history="1" />
@@ -41,6 +42,7 @@
 		<Add mover_name="fastrelax" />
 		<Add mover_name="calc_proteinscores" />
 		<Add mover_name="pmm" />
+		<Add filter="contacts" />
 	</PROTOCOLS>
 	<OUTPUT scorefxn="beta" />
 </ROSETTASCRIPTS>
