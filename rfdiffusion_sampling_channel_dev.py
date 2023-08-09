@@ -21,10 +21,11 @@ import superimposition_tools
 from protocols.composite_protocols import calculate_fastrelax_sidechain_rmsd
 from protocols.composite_protocols import rosetta_scripts_and_mean
 
-def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None, use_soluble_model:bool=False) -> Poses:
+def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None, use_soluble_model:bool=False, params_file:str=None) -> Poses:
     '''AAA'''
     # run fastrelax on predicted poses
-    fr_opts = f"-beta -parser:protocol {args.refinement_protocol} -extra_res_fa {args.input_dir}/ligand/LG1.params"
+    fr_opts = f"-beta -parser:protocol {args.refinement_protocol}"
+    if params_file: fr_opts += f" -extra_res_fa {params_file}"
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=n, prefix=f"{prefix}_refinement")
     
     # calculate RMSDs and filter
@@ -36,7 +37,7 @@ def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts"
     poses = mpnn_design_and_esmfold(poses, prefix=prefix, num_mpnn_seqs=48, num_esm_inputs=16, num_esm_outputs_per_input_backbone=5, motif_ref_pdb_col=ref_pdb_col, bb_rmsd_col=f"{prefix}_refinement_location", rmsd_weight=3, mpnn_fixedres_col=mpnn_fixedres_col, use_soluble_model=use_soluble_model, disfavor_alanines=1)
     return poses
 
-def mpnn_fr(poses, prefix:str, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, reference_location_col="input_poses"):
+def mpnn_fr(poses, prefix:str, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, reference_location_col="input_poses", params_file:str=None):
     '''AAA'''
     def collapse_dict_values(in_dict: dict) -> str:
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
@@ -47,7 +48,8 @@ def mpnn_fr(poses, prefix:str, fastrelax_pose_opts="fr_pose_opts", pdb_location_
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target=1 --sampling_temp=0.05", prefix=f"{prefix}_mpnn", fixed_positions_col="fixed_residues")
 
     # reset poses to Structures:
-    fr_opts = f"-beta -parser:protocol {args.fastrelax_protocol} -extra_res_fa {args.input_dir}/ligand/LG1.params"
+    fr_opts = f"-beta -parser:protocol {args.fastrelax_protocol}"
+    if params_file: fr_opts += f" -extra_res_fa {params_file}"
     poses.poses_df["poses"] = poses.poses_df[pdb_location_col]
     poses.poses_df["poses_description"] = poses.poses_df["poses"].str.split("/").str[-1].str.replace(".pdb","")
 
@@ -209,7 +211,6 @@ def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_co
     output_pdb_names_list = [f"{out_pdb_path}/{desc}.pdb" for desc in input_df[desc_col].to_list()]
     
     # renumber
-    print(keep_ligand_chain)
     return [utils.biopython_tools.renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output, keep_chain=keep_ligand_chain) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
 
 def parse_outfilter_args(scoreterm_str: str, weights_str: str, df: pd.DataFrame, prefix:str=None) -> tuple[list]:
@@ -320,6 +321,15 @@ def mpnn_probs_fd(poses, motif_col:str):
     # plot 
     return poses, index_layers
 
+def get_params_file(string: str) -> str:
+    '''Checks if args.params_file contains a params file path. If not, it looks for an automatically generated params file. If there is none either, it will not use any params file (return None)'''
+    if string: return string
+    else:
+        if os.path.isfile((params := f"{args.input_dir}/ligand/LG1.params")):
+            return params
+        else:
+            return None
+
 def main(args):
     # print Status
     print(f"\n{'#'*50}\nRunning rfdiffusion_ensembles_sampling.py on {args.input_dir}\n{'#'*50}\n")
@@ -329,8 +339,9 @@ def main(args):
     ensembles = Poses(args.output_dir, glob(f"{pdb_dir}/*.pdb"))
     ensembles.max_rfdiffusion_gpus = args.max_rfdiffusion_gpus
     plot_dir = ensembles.plot_dir
-    keep_ligand_chain = check_for_params(args.input_dir, args.ligand_chain)
-    if keep_ligand_chain: ensembles.poses_df["params_file_path"] = [f"{args.input_dir}/ligand/LG1.params" for x in ensembles.poses_df["poses"].to_list()]
+    keep_ligand_chain = args.ligand_chain
+    params_file = get_params_file(args.params_file)
+    if params_file: ensembles.poses_df["params_file_path"] = [f"{args.input_dir}/ligand/LG1.params" for x in ensembles.poses_df["poses"].to_list()]
 
     # Read scores of selected paths from ensemble_evaluator and store them in poses_df:
     path_df = pd.read_json(f"{args.input_dir}/selected_paths.json").reset_index().rename(columns={"index": "rdescription"})
@@ -394,12 +405,12 @@ def main(args):
     # Copy and rewrite Fragments into output_dir/reference_fragments
     if not os.path.isdir((updated_ref_frags_dir := f"{ensembles.dir}/updated_reference_frags/")): os.makedirs(updated_ref_frags_dir)
     
-    ensembles.poses_df["updated_reference_frags_location"] = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=updated_ref_frags_dir, keep_ligand_chain=keep_ligand_chain)
+    ensembles.poses_df["updated_reference_frags_location"] = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=updated_ref_frags_dir, keep_ligand_chain=args.ligand_chain)
     
     # superimpose poses on reference frags and calculate ligand scores:
-    if keep_ligand_chain: 
-        ligposes = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix="postdiffusion_lig_poses")
-        calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="rfdiffusion", ligand_chain=args.ligand_chain)
+    #if keep_ligand_chain: 
+    ligposes = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix="postdiffusion_lig_poses")
+    calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="rfdiffusion", ligand_chain=args.ligand_chain)
 
     # filter based on rfdiffusion pLDDT (implement args.rfdiffusion_plddt_fraction):
     rfdiff_plddt_filter = ensembles.filter_poses_by_score(0.95, "rfdiffusion_plddt", prefix="rfdiffusion_plddt_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
@@ -421,7 +432,7 @@ def main(args):
         cycle_prefix = f"cycle_{str(i)}"
 
         # run mpnn and fr
-        ensembles, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, reference_location_col="updated_reference_frags_location")
+        ensembles, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, reference_location_col="updated_reference_frags_location", params_file=params_file)
 
         # plot
         fr_mpnn_rmsd_traj.add_and_plot(ensembles.poses_df[f"cycle_{str(i)}_fr_bb_ca_motif_rmsd"], f"cycle_{str(i)}")
@@ -498,7 +509,7 @@ def main(args):
         # refine
         ensembles.poses_df["fastdesign_opts"] = [write_fastdesign_opts(row, cycle=i, total_cycles=args.refinement_cycles, reference_location_col="updated_reference_frags_location", motif_res_col="motif_residues", cat_res_col="fixed_residues", designres_col=f"{c_pref}_mpnn_fixed_residues", resfile_col=f"{c_pref}_resfiles") for index, row in ensembles.poses_df.iterrows()]
         #ensembles.poses_df["refinement_opts"] = ensembles.poses_df["fr_pose_opts"].str.replace(" -parser:script_vars ", f" -parser:script_vars sd={str(0.5 + i)} ")
-        ensembles = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, fastrelax_pose_opts="fastdesign_opts", ref_pdb_col="updated_reference_frags_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
+        ensembles = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, fastrelax_pose_opts="fastdesign_opts", ref_pdb_col="updated_reference_frags_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True, params_file=params_file)
         
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
@@ -606,6 +617,9 @@ if __name__ == "__main__":
     argparser.add_argument("--attr_dist", type=float, default=0, help="weight of the potential")
     argparser.add_argument("--decentralize", type=float, default=2, help="Set this value higher if you want your substrate more buried.")
     argparser.add_argument("--custom_diffusion_center", type=str, default="False", help="Do you want to use a custom center for diffusion?")
+
+    # rosetta
+    argparser.add_argument("--params_file", type=str, default=None, help="Path to a custom params file, if you want Rosetta to use your params file.")
 
     # linkers
     argparser.add_argument("--flanking", type=str, default="split", help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")

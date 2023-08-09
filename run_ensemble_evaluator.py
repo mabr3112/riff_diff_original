@@ -1007,7 +1007,7 @@ if __name__ == "__main__":
     
     # PDB Options
     argparser.add_argument("--max_num", type=int, default=50, help="Number of pdb-files that will be created by pathsearch.")
-    argparser.add_argument("--pdb_length", type=int, default=100, help="Maximum length of the pdb-files that will be inpainted.")
+    argparser.add_argument("--pdb_length", type=int, default=200, help="Maximum length of the pdb-files that will be inpainted.")
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="PDB letter for Ligand chain. The ligand will be used as substrate during diffusion.")
     argparser.add_argument("--add_channel", type=str, default="/home/mabr3112/riff_diff/utils/helix_cone_long.pdb", help="If specified, adds the structure specified to the fragment to be used as a 'substrate channel' during diffusion. IMPORTANT!!!  Channel pdb-chain name has to be 'Q' ")
     argparser.add_argument("--auto_superimpose_channel", type=str, default="True", help="Set to false, if you want to copy the channel pdb-chain from the reference file without superimposing on moitf-substrate centroid axis.")
@@ -1016,14 +1016,14 @@ if __name__ == "__main__":
     # Filter Options
     argparser.add_argument("--max_linker_length", type=int, default=10, help="Maximum length of linkers that the fragments should be connected with.")
     argparser.add_argument("--short_linker_preference", type=float, default=0.01, help="Strength for how much short linkers should be upweighted in scoring.")
-    argparser.add_argument("--max_linker_distance", type=float, default=15, help="Maximum Distance that the linker should have.")
-    argparser.add_argument("--weight_rotprob", type=float, default=1, help="Strength of the rotamer probability weight for filtering")
-    argparser.add_argument("--weight_structure_quality", type=float, default=1, help="Strength of the structure quality weight for filtering")
-    argparser.add_argument("--sample_from_subset_fraction", type=float, default=0.2, help="Take random sample from top <subset> rows of DataFrame.")
+    argparser.add_argument("--max_linker_distance", type=float, default=50, help="Maximum Distance that the linker should have.")
+    argparser.add_argument("--weight_rotprob", type=float, default=3, help="Strength of the rotamer probability weight for filtering")
+    argparser.add_argument("--weight_structure_quality", type=float, default=0.1, help="Strength of the structure quality weight for filtering")
+    argparser.add_argument("--sample_from_subset_fraction", type=float, default=0.5, help="Take random sample from top <subset> rows of DataFrame.")
 
     # Structure Quality
     argparser.add_argument("--plddt_threshold", type=float, default=0.0, help="Threshold for filtering inpaint plddts during quality-score calculation")
-    argparser.add_argument("--rmsd_threshold", type=float, default=5, help="Threshold tolerance for RMSD during quality-score calculation")
+    argparser.add_argument("--rmsd_threshold", type=float, default=15, help="Threshold tolerance for RMSD during quality-score calculation")
     argparser.add_argument("--rmsd_strength", type=float, default=1, help="Strength for RMSD filtering if RMSD is above the Threshold. For quality-score calculation")
 
     # logging:
