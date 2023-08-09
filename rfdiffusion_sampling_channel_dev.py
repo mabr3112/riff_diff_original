@@ -590,6 +590,12 @@ def main(args):
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
     pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"final_downsampling_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
 
+    # write csv file for coupled-moves
+    csv_df = ensembles.poses_df["poses_description"]
+    csv_df["continue"] = ["" for i in list(csv_df["poses_description"])]
+    csv_df["mutations"] = ["" for i in list(csv_df["poses_description"])]
+    csv_df.to_csv(f"{results_dir}/coupled_moves_input_selection.csv")
+
     print("done")
 
 
