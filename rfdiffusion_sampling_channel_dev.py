@@ -265,7 +265,7 @@ def calc_ligand_stats(input_df: pd.DataFrame, ref_frags_col:str, ref_motif_col:s
 
     # calculate statistics of ligands:
     loaded_poses = [utils.biopython_tools.load_structure_from_pdbfile(pose) for pose in poses]
-    input_df[f"{prefix}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, dist=1.4, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
+    input_df[f"{prefix}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, dist=2.5, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
     input_df[f"{prefix}_peratom_ligand_contacts"] = [utils.metrics.calc_ligand_contacts_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, d_0=3.5, r_0=3.5, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
 
     # calculate pocket scores
@@ -373,7 +373,7 @@ def main(args):
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
 
     # if custom center should be added:
-    if args.custom_diffusion_center.upper() == "True":
+    if args.custom_diffusion_center.lower() == "true":
         # from dataframe (added during run_ensemble_evaluator.py)
         c_x, c_y, c_z = ensembles.poses_df.loc[0, "diffusion_custom_center"].split(",")
         diffusion_options = diffusion_options.replace(",decentralize", f",rc_x:{c_x},rc_y:{c_y},rc_z:{c_z},decentralize")
@@ -426,7 +426,6 @@ def main(args):
     # cycle MPNN and FastRelax:
     index_layers=1
     pdb_loc_col = "postdiffusion_chainremoval_location" 
-    print([x for x in ensembles.poses_df.columns if "location" in x])
     fr_mpnn_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/fr_mpnn_rmsd_trajectory.png", title="Motif BB-Ca\nTrajectory", dims=(0,3))
     for i in range(1):
         cycle_prefix = f"cycle_{str(i)}"
@@ -456,9 +455,12 @@ def main(args):
         post_esm_lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"post_esm_lig_poses")
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_esm", ligand_chain=args.ligand_chain)
 
-    # Filter down to final set of .pdbs that will be input for Rosetta Refinement:
-    #scoreterms, weights = parse_outfilter_args(args.output_scoreterms, args.output_scoreterm_weights, ensembles.poses_df, prefix="round1")
-    out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", (st := [f"round1_esm_plddt", f"round1_esm_bb_ca_motif_rmsd", f"post_esm_pocket_score_v2", f"post_esm_peratom_ligand_contacts"]), [-0.75,1.5,-0.75,0.75])
+    # remove poses that have ligand clashes:
+    ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["post_esm_ligand_clash"] == False]
+    ensembles.poses_df["post_esm_rog"] = [utils.metrics.calc_rog_of_pdb(pose) for pose in ensembles.poses_df["poses"]]
+
+    # Filter down to final set of .pdbs that will be input for Rosetta Refinement: Filter based on pLDDT, ligand contacts (pocket), protein ROG and motif RMSD.
+    out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", (st := [f"round1_esm_plddt", f"round1_esm_bb_ca_motif_rmsd", f"post_esm_rog", f"post_esm_pocket_score_v2", f"post_esm_peratom_ligand_contacts"]), [-0.75,1.5,0.2,-0.3,0.4])
     out_filter = ensembles.filter_poses_by_score(args.num_refinement_inputs, f"out_filter_comp_score", prefix="out_filter", plot=st)
     results_dir = f"{args.output_dir}/intermediate_results/"
     ref_frag_dir = f"{results_dir}/ref_fragments/"
@@ -496,10 +498,12 @@ def main(args):
     filter_layers = 2
     index_layers_to_remove = 2
     idx = index_layers
+    
+    # add back the ligand
+    lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"pre_refinement_lig_poses")
+    
     for i in range(args.refinement_cycles):
         c_pref = f"refinement_cycle_{str(i).zfill(2)}"
-        # copy the ligand into the structures:
-        lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"{c_pref}_lig_poses")
 
         # calculate MPNN probabilities and write resfiles
         ensembles.poses_df[f"{c_pref}_mpnn_fixed_residues"] = [get_design_residues(row, motif_res_col="motif_residues", cat_res_col="fixed_residues", lig_chain=args.ligand_chain) for index, row in ensembles.poses_df.iterrows()]
@@ -510,6 +514,13 @@ def main(args):
         ensembles.poses_df["fastdesign_opts"] = [write_fastdesign_opts(row, cycle=i, total_cycles=args.refinement_cycles, reference_location_col="updated_reference_frags_location", motif_res_col="motif_residues", cat_res_col="fixed_residues", designres_col=f"{c_pref}_mpnn_fixed_residues", resfile_col=f"{c_pref}_resfiles") for index, row in ensembles.poses_df.iterrows()]
         #ensembles.poses_df["refinement_opts"] = ensembles.poses_df["fr_pose_opts"].str.replace(" -parser:script_vars ", f" -parser:script_vars sd={str(0.5 + i)} ")
         ensembles = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, fastrelax_pose_opts="fastdesign_opts", ref_pdb_col="updated_reference_frags_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True, params_file=params_file)
+
+        # add back the ligand
+        lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"{c_pref}_lig_poses")
+
+        # remove outputs that have ligand clashes:
+        ensembles.poses_df[f"{c_pref}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pdb_path=pose, ligand_chain=args.ligand_chain, dist=2.4) for pose in ensembles.poses_df["poses"].to_list()]
+        ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_ligand_clash"] == False]
         
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
@@ -560,20 +571,20 @@ def main(args):
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_refinement", ligand_chain=args.ligand_chain)
 
     # Ligand added back in, now run GALigandDock:
-    docking_options = f"-parser:protocol {args.docking_protocol} -parser:script_vars ligchain={args.ligand_chain}"
-    docked_poses = rosetta_scripts_and_mean(ensembles, prefix="final_dock", n=15, options=docking_options, pose_options=None, filter_scoreterm="final_dock_dG", scoreterms="")
+    #docking_options = f"-parser:protocol {args.docking_protocol} -parser:script_vars ligchain={args.ligand_chain}"
+    #docked_poses = rosetta_scripts_and_mean(ensembles, prefix="final_dock", n=15, options=docking_options, pose_options=None, filter_scoreterm="final_dock_dG", scoreterms=None)
 
     # remove any structures that have an AF2 pLDDT below 85, Ca RMSD > 1
     #ensembles.poses_df = ensembles.poses_df[(ensembles.poses_df["af2_top_plddt"] <= 85) & (ensembles.poses_df["af2_bb_ca_rmsd"] <= 1) & (ensembles.poses_df["af2_bb_ca_motif_rmsd"] <= 1.5)]
     
     # store poses before final downsampling
-    os.makedirs((docked_poses_dir := f"{ensembles.dir}/docked_poses/"), exist_ok=True)
-    ensembles.dump_poses(docked_poses_dir)
-    ensembles.poses_df.to_json(f"{docked_poses_dir}/docked_scores.json")
+    #os.makedirs((docked_poses_dir := f"{ensembles.dir}/docked_poses/"), exist_ok=True)
+    #ensembles.dump_poses(docked_poses_dir)
+    #ensembles.poses_df.to_json(f"{docked_poses_dir}/docked_scores.json")
 
     # final backbone downsampling
     final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.5])
-    final_downsampling = ensembles.filter_poses_by_score(1, f"final_downsampling_comp_score", prefix=f"output_filter", remove_layers=2, plot=[f"final_downsampling_comp_score", f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "af2_bb_ca_rmsd", "af2_mean_plddt", "post_refinement_rmsdcheck_fr_sap_score"])
+    final_downsampling = ensembles.filter_poses_by_score(1, f"final_downsampling_comp_score", prefix=f"output_filter", remove_layers=3, plot=[f"final_downsampling_comp_score", f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "af2_bb_ca_rmsd", "af2_mean_plddt", "post_refinement_rmsdcheck_fr_sap_score"])
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
@@ -588,10 +599,10 @@ def main(args):
 
     # Write PyMol Alignment Script
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
-    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"final_downsampling_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
+    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"final_downsampling_comp_score", top_n=len(ensembles.poses_df), path_to_script=f"{results_dir}/align.pml")
 
     # write csv file for coupled-moves
-    csv_df = ensembles.poses_df["poses_description"]
+    csv_df = pd.DataFrame(ensembles.poses_df["poses_description"])
     csv_df["continue"] = ["" for i in list(csv_df["poses_description"])]
     csv_df["mutations"] = ["" for i in list(csv_df["poses_description"])]
     csv_df.to_csv(f"{results_dir}/coupled_moves_input_selection.csv")
