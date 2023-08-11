@@ -558,10 +558,10 @@ def main(args):
     check_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix="check_postrelax_catres")
 
     # plot af2_stats:
-    cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_rmsd", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_fr_sap_score", "check_postrelax_catres_motif_heavy_rmsd"]
-    titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "Relax Min.\n Sidechain RMSD", "SAP Score", "check RMSD"]
-    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "SAP Score [AU]", "RMSD [\u00C5]"]
-    dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,5), (0,5), (0,150), (0,5)]
+    cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_rmsd", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_sidechain_motif_heavy_rmsd"]
+    titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "Relax Min.\n Sidechain RMSD"]
+    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]"]
+    dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,5), (0,5)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plot_dir}/af2_stats.png")
     
     # superimpose poses on reference frags and calculate ligand scores:
@@ -582,8 +582,22 @@ def main(args):
     #ensembles.dump_poses(docked_poses_dir)
     #ensembles.poses_df.to_json(f"{docked_poses_dir}/docked_scores.json")
 
+
+    # calc perres Rosetta stats
+    ensembles.poses_df["post_refinement_rmsdcheck_total_score_perres"] = ensembles.poses_df["post_refinement_rmsdcheck_fr_total_score"] / ensembles.poses_df["post_refinement_rmsdcheck_fr_all_selection_count"]
+    ensembles.poses_df["perres_core_fa_atr"] = ensembles.poses_df["post_refinement_rmsdcheck_fr_total_energy"] / ensembles.poses_df["post_refinement_rmsdcheck_fr_core_selection_count"]
+    ensembles.poses_df["perres_contacts"] = ensembles.poses_df["post_refinement_rmsdcheck_fr_contacts"] / ensembles.poses_df["post_refinement_rmsdcheck_fr_all_selection_count"]
+    ensembles.poses_df["perres_sap"] = ensembles.poses_df["post_refinement_rmsdcheck_fr_sap_score"] / ensembles.poses_df["post_refinement_rmsdcheck_fr_all_selection_count"]
+
+    # plot Rosetta stats:
+    cols_r = ["post_refinement_rmsdcheck_total_score_perres", "perres_core_fa_atr", "perres_contacts", "perres_sap"]
+    titles_r = ["Total Score", "Core Stability", "Atomic Density", "SAP Score"]
+    y_labels_r = ["[REU] / residue", "fa_atr [REU] / residue", "count", "SAP / residue"]
+    dims_r = [(-5, 0), (-6, 0), (0, 5), (0, 1.5)]
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols_r, titles=titles_r, y_labels=y_labels_r, dims=dims_r, out_path=f"{plot_dir}/rosetta_final_stats.png")
+  
     # final backbone downsampling
-    final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.5])
+    final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.25])
     final_downsampling = ensembles.filter_poses_by_score(1, f"final_downsampling_comp_score", prefix=f"output_filter", remove_layers=3, plot=[f"final_downsampling_comp_score", f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "af2_bb_ca_rmsd", "af2_mean_plddt", "post_refinement_rmsdcheck_fr_sap_score"])
 
     # make new results, copy fragments and write alignment_script
@@ -593,6 +607,7 @@ def main(args):
     ensembles.dump_poses(results_dir)
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plot_dir}/af2_final_stats.png")
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{results_dir}/af2_final_stats.png")
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols_r, titles=titles_r, y_labels=y_labels_r, dims=dims_r, out_path=f"{results_dir}/rosetta_final_stats.png")
 
     # Copy and rewrite Fragments into output_dir/reference_fragments
     updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=ref_frag_dir, keep_ligand_chain=args.ligand_chain)
