@@ -19,11 +19,13 @@ from utils.plotting import PlottingTrajectory
 import utils.metrics as metrics
 import superimposition_tools
 from protocols.composite_protocols import calculate_fastrelax_sidechain_rmsd
+from protocols.composite_protocols import rosetta_scripts_and_mean
 
-def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None, use_soluble_model:bool=False) -> Poses:
+def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None, use_soluble_model:bool=False, params_file:str=None) -> Poses:
     '''AAA'''
     # run fastrelax on predicted poses
-    fr_opts = f"-beta -parser:protocol {args.refinement_protocol} -extra_res_fa {args.input_dir}/ligand/LG1.params"
+    fr_opts = f"-beta -parser:protocol {args.refinement_protocol}"
+    if params_file: fr_opts += f" -extra_res_fa {params_file}"
     fr = poses.rosetta("rosetta_scripts.default.linuxgccrelease", options=fr_opts, pose_options=poses.poses_df[fastrelax_pose_opts].to_list(), n=n, prefix=f"{prefix}_refinement")
     
     # calculate RMSDs and filter
@@ -35,7 +37,7 @@ def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts"
     poses = mpnn_design_and_esmfold(poses, prefix=prefix, num_mpnn_seqs=48, num_esm_inputs=16, num_esm_outputs_per_input_backbone=5, motif_ref_pdb_col=ref_pdb_col, bb_rmsd_col=f"{prefix}_refinement_location", rmsd_weight=3, mpnn_fixedres_col=mpnn_fixedres_col, use_soluble_model=use_soluble_model, disfavor_alanines=1)
     return poses
 
-def mpnn_fr(poses, prefix:str, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, reference_location_col="input_poses"):
+def mpnn_fr(poses, prefix:str, fastrelax_pose_opts="fr_pose_opts", pdb_location_col:str=None, reference_location_col="input_poses", params_file:str=None):
     '''AAA'''
     def collapse_dict_values(in_dict: dict) -> str:
         return ",".join([str(y) for x in in_dict.values() for y in list(x)])
@@ -46,7 +48,8 @@ def mpnn_fr(poses, prefix:str, fastrelax_pose_opts="fr_pose_opts", pdb_location_
     mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target=1 --sampling_temp=0.05", prefix=f"{prefix}_mpnn", fixed_positions_col="fixed_residues")
 
     # reset poses to Structures:
-    fr_opts = f"-beta -parser:protocol {args.fastrelax_protocol} -extra_res_fa {args.input_dir}/ligand/LG1.params"
+    fr_opts = f"-beta -parser:protocol {args.fastrelax_protocol}"
+    if params_file: fr_opts += f" -extra_res_fa {params_file}"
     poses.poses_df["poses"] = poses.poses_df[pdb_location_col]
     poses.poses_df["poses_description"] = poses.poses_df["poses"].str.split("/").str[-1].str.replace(".pdb","")
 
@@ -83,7 +86,7 @@ def write_fastdesign_opts(row: pd.Series, cycle: int, total_cycles: int, referen
 def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues", disfavor_alanines:int=1, calc_perplexity=False):
     '''AAA'''
     # Run MPNN and filter (by half)
-    mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues", use_soluble_model=use_soluble_model)
+    mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1 --omit_AAs=C", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues", use_soluble_model=use_soluble_model)
     poses.poses_df[f"{prefix}_alanine_content"] = poses.poses_df[f"{prefix}_mpnn_sequence"].str.count("A") / poses.poses_df[f"{prefix}_mpnn_sequence"].str.len()
     alanine_content_weight = (poses.poses_df[f"{prefix}_alanine_content"].mean() - 0.1) * 8 * disfavor_alanines 
     print(f"alanine_content_weight: {alanine_content_weight}")
@@ -91,17 +94,21 @@ def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inp
     # calc composite score between MPNN score and alanine content:
     mpnn_compscore = poses.calc_composite_score(f"{prefix}_mpnn_compscore", [f"{prefix}_mpnn_score", f"{prefix}_alanine_content"], [1, alanine_content_weight])
     mpnn_seqfilter = poses.filter_poses_by_score(num_esm_inputs, f"{prefix}_mpnn_compscore", prefix=f"{prefix}_mpnn_seqfilter", remove_layers=1, plot=[f"{prefix}_mpnn_score", f"{prefix}_alanine_content"])
+    print(f"mpnn_design_and_esmfold, after mpnn filtering: {len(poses.poses_df['poses'])}")
 
     # Run ESMFold and calc bb_ca_rmsd, motif_ca_rmsd and motif_heavy RMSD
     if calc_perplexity: esm_singlepass_logprobs = poses.calc_esm2_pseudo_perplexity(options="--singlepass True", prefix=f"round1_singlepass", max_cores=1000)
     esm_preds = poses.predict_sequences(run_ESMFold, prefix=f"{prefix}_esm")
+    print(f"mpnn_design_and_esmfold, After prediction: {len(poses.poses_df['poses'])}")
     esm_bb_ca_rmsds = poses.calc_bb_rmsd_df(ref_pdb=bb_rmsd_col, metric_prefix=f"{prefix}_esm")
     esm_motif_rmsds = poses.calc_motif_bb_rmsd_df(ref_pdb=motif_ref_pdb_col, ref_motif=ref_motif_col, target_motif=motif_col, metric_prefix=f"{prefix}_esm_bb_ca")
     esm_motif_heavy_rmsds = poses.calc_motif_heavy_rmsd_df(ref_pdb=motif_ref_pdb_col, ref_motif=ref_catres_motif_col, target_motif=catres_motif_col, metric_prefix=f"{prefix}_esm_catres")
 
     # Filter Redesigns based on confidence and RMSDs
+    print(f"mpnn_design_and_esmfold, Before filtering: {len(poses.poses_df['poses'])}")
     esm_comp_score = poses.calc_composite_score(f"{prefix}_esm_comp_score", [f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_motif_rmsd"], [-1, rmsd_weight])
     esm_filter = poses.filter_poses_by_score(num_esm_outputs_per_input_backbone, f"{prefix}_esm_comp_score", remove_layers=1, prefix=f"{prefix}_esm_filter", plot=[f"{prefix}_esm_comp_score", f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_rmsd", f"{prefix}_esm_bb_ca_motif_rmsd", f"{prefix}_esm_catres_motif_heavy_rmsd"])
+    print(f"mpnn_design_and_esmfold, After filtering: {len(poses.poses_df['poses'])}")
     
     # Plot Results
     if not os.path.isdir((plotdir := f"{poses.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
@@ -208,7 +215,6 @@ def update_and_copy_reference_frags(input_df: pd.DataFrame, ref_col:str, desc_co
     output_pdb_names_list = [f"{out_pdb_path}/{desc}.pdb" for desc in input_df[desc_col].to_list()]
     
     # renumber
-    print(keep_ligand_chain)
     return [utils.biopython_tools.renumber_pdb_by_residue_mapping(ref_frag, res_mapping, out_pdb_path=pdb_output, keep_chain=keep_ligand_chain) for ref_frag, res_mapping, pdb_output in zip(input_df[ref_col].to_list(), list_of_mappings, output_pdb_names_list)]
 
 def parse_outfilter_args(scoreterm_str: str, weights_str: str, df: pd.DataFrame, prefix:str=None) -> tuple[list]:
@@ -263,8 +269,8 @@ def calc_ligand_stats(input_df: pd.DataFrame, ref_frags_col:str, ref_motif_col:s
 
     # calculate statistics of ligands:
     loaded_poses = [utils.biopython_tools.load_structure_from_pdbfile(pose) for pose in poses]
-    input_df[f"{prefix}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, dist=1.4, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
-    input_df[f"{prefix}_peratom_ligand_contacts"] = [utils.metrics.calc_ligand_contacts_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, d_0=3.5, r_0=3.5, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
+    input_df[f"{prefix}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, dist=1.8, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
+    input_df[f"{prefix}_peratom_ligand_contacts"] = [utils.metrics.calc_ligand_contacts_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, d_0=3.4, r_0=3.5, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
 
     # calculate pocket scores
     input_df[f"{prefix}_pocket_score"] = [utils.metrics.calc_pocket_score(pose, ligand_chain=ligand_chain, rep_weight=4, coordination_strength=5, coordination_radius=8) for pose in loaded_poses]
@@ -319,6 +325,15 @@ def mpnn_probs_fd(poses, motif_col:str):
     # plot 
     return poses, index_layers
 
+def get_params_file(string: str) -> str:
+    '''Checks if args.params_file contains a params file path. If not, it looks for an automatically generated params file. If there is none either, it will not use any params file (return None)'''
+    if string: return string
+    else:
+        if os.path.isfile((params := f"{args.input_dir}/ligand/LG1.params")):
+            return params
+        else:
+            return None
+
 def main(args):
     # print Status
     print(f"\n{'#'*50}\nRunning rfdiffusion_ensembles_sampling.py on {args.input_dir}\n{'#'*50}\n")
@@ -328,8 +343,9 @@ def main(args):
     ensembles = Poses(args.output_dir, glob(f"{pdb_dir}/*.pdb"))
     ensembles.max_rfdiffusion_gpus = args.max_rfdiffusion_gpus
     plot_dir = ensembles.plot_dir
-    keep_ligand_chain = check_for_params(args.input_dir, args.ligand_chain)
-    if keep_ligand_chain: ensembles.poses_df["params_file_path"] = [f"{args.input_dir}/ligand/LG1.params" for x in ensembles.poses_df["poses"].to_list()]
+    keep_ligand_chain = args.ligand_chain
+    params_file = get_params_file(args.params_file)
+    if params_file: ensembles.poses_df["params_file_path"] = [f"{args.input_dir}/ligand/LG1.params" for x in ensembles.poses_df["poses"].to_list()]
 
     # Read scores of selected paths from ensemble_evaluator and store them in poses_df:
     path_df = pd.read_json(f"{args.input_dir}/selected_paths.json").reset_index().rename(columns={"index": "rdescription"})
@@ -361,7 +377,7 @@ def main(args):
     diffusion_options = parse_diffusion_options(diffusion_options, args.rfdiffusion_additional_options)
 
     # if custom center should be added:
-    if args.custom_diffusion_center.upper() == "True":
+    if args.custom_diffusion_center.lower() == "true":
         # from dataframe (added during run_ensemble_evaluator.py)
         c_x, c_y, c_z = ensembles.poses_df.loc[0, "diffusion_custom_center"].split(",")
         diffusion_options = diffusion_options.replace(",decentralize", f",rc_x:{c_x},rc_y:{c_y},rc_z:{c_z},decentralize")
@@ -384,8 +400,8 @@ def main(args):
 
     # calculate ROG and contacts:
     ensembles.poses_df["rfdiffusion_rog"] = [metrics.calc_rog_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
-    ensembles.poses_df["rfdiffusion_contacts_short"] = [metrics.calc_intra_contacts_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
-    ensembles.poses_df["rfdiffusion_contacts_long"] = [metrics.calc_intra_contacts_of_pdb(pose, d_0=3.9, r_0=3.9) for pose in ensembles.poses_df["poses"].to_list()]
+    #ensembles.poses_df["rfdiffusion_contacts_short"] = [metrics.calc_intra_contacts_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
+    #ensembles.poses_df["rfdiffusion_contacts_long"] = [metrics.calc_intra_contacts_of_pdb(pose, d_0=3.9, r_0=3.9) for pose in ensembles.poses_df["poses"].to_list()]
 
     # Calculate RMSD and composite score:
     diffusion_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="rfdiffusion_template_bb_ca", remove_layers=1)
@@ -393,12 +409,12 @@ def main(args):
     # Copy and rewrite Fragments into output_dir/reference_fragments
     if not os.path.isdir((updated_ref_frags_dir := f"{ensembles.dir}/updated_reference_frags/")): os.makedirs(updated_ref_frags_dir)
     
-    ensembles.poses_df["updated_reference_frags_location"] = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=updated_ref_frags_dir, keep_ligand_chain=keep_ligand_chain)
+    ensembles.poses_df["updated_reference_frags_location"] = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=updated_ref_frags_dir, keep_ligand_chain=args.ligand_chain)
     
     # superimpose poses on reference frags and calculate ligand scores:
-    if keep_ligand_chain: 
-        ligposes = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix="postdiffusion_lig_poses")
-        calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="rfdiffusion", ligand_chain=args.ligand_chain)
+    #if keep_ligand_chain: 
+    ligposes = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix="postdiffusion_lig_poses")
+    calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="rfdiffusion", ligand_chain=args.ligand_chain)
 
     # filter based on rfdiffusion pLDDT (implement args.rfdiffusion_plddt_fraction):
     rfdiff_plddt_filter = ensembles.filter_poses_by_score(0.95, "rfdiffusion_plddt", prefix="rfdiffusion_plddt_filter", ascending=False, plot=["rfdiffusion_plddt", "rfdiffusion_template_bb_ca_motif_rmsd", "rfdiffusion_peratom_ligand_contacts", "rfdiffusion_pocket_score", "rfdiffusion_pocket_score_v2", "rfdiffusion_pocket_score_v3"])
@@ -414,13 +430,12 @@ def main(args):
     # cycle MPNN and FastRelax:
     index_layers=1
     pdb_loc_col = "postdiffusion_chainremoval_location" 
-    print([x for x in ensembles.poses_df.columns if "location" in x])
     fr_mpnn_rmsd_traj = PlottingTrajectory(y_label="RMSD [\u00C5]", location=f"{plot_dir}/fr_mpnn_rmsd_trajectory.png", title="Motif BB-Ca\nTrajectory", dims=(0,3))
     for i in range(1):
         cycle_prefix = f"cycle_{str(i)}"
 
         # run mpnn and fr
-        ensembles, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, reference_location_col="updated_reference_frags_location")
+        ensembles, fr_pdb_dir = mpnn_fr(ensembles, prefix=f"cycle_{str(i)}", fastrelax_pose_opts="fr_pose_opts", pdb_location_col=pdb_loc_col, reference_location_col="updated_reference_frags_location", params_file=params_file)
 
         # plot
         fr_mpnn_rmsd_traj.add_and_plot(ensembles.poses_df[f"cycle_{str(i)}_fr_bb_ca_motif_rmsd"], f"cycle_{str(i)}")
@@ -444,9 +459,13 @@ def main(args):
         post_esm_lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"post_esm_lig_poses")
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_esm", ligand_chain=args.ligand_chain)
 
-    # Filter down to final set of .pdbs that will be input for Rosetta Refinement:
-    #scoreterms, weights = parse_outfilter_args(args.output_scoreterms, args.output_scoreterm_weights, ensembles.poses_df, prefix="round1")
-    out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", (st := [f"round1_esm_plddt", f"round1_esm_bb_ca_motif_rmsd", f"post_esm_pocket_score_v2", f"post_esm_peratom_ligand_contacts"]), [-0.75,1.5,-0.75,0.75])
+    # remove poses that have ligand clashes:
+    print(f"Removing {len(ensembles.poses_df[ensembles.poses_df['post_esm_ligand_clash'] == True])} poses from poses_df because of Ligand Clashes." )
+    ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["post_esm_ligand_clash"] == False]
+    ensembles.poses_df["post_esm_rog"] = [utils.metrics.calc_rog_of_pdb(pose) for pose in ensembles.poses_df["poses"]]
+
+    # Filter down to final set of .pdbs that will be input for Rosetta Refinement: Filter based on pLDDT, ligand contacts (pocket), protein ROG and motif RMSD.
+    out_filterscore = ensembles.calc_composite_score("out_filter_comp_score", (st := [f"round1_esm_plddt", f"round1_esm_bb_ca_motif_rmsd", f"post_esm_rog", f"post_esm_pocket_score_v2", f"post_esm_peratom_ligand_contacts"]), [-0.75,1.5,0.2,-0.3,0.4])
     out_filter = ensembles.filter_poses_by_score(args.num_refinement_inputs, f"out_filter_comp_score", prefix="out_filter", plot=st)
     results_dir = f"{args.output_dir}/intermediate_results/"
     ref_frag_dir = f"{results_dir}/ref_fragments/"
@@ -484,10 +503,12 @@ def main(args):
     filter_layers = 2
     index_layers_to_remove = 2
     idx = index_layers
+    
+    # add back the ligand
+    lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"pre_refinement_lig_poses")
+    
     for i in range(args.refinement_cycles):
         c_pref = f"refinement_cycle_{str(i).zfill(2)}"
-        # copy the ligand into the structures:
-        lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"{c_pref}_lig_poses")
 
         # calculate MPNN probabilities and write resfiles
         ensembles.poses_df[f"{c_pref}_mpnn_fixed_residues"] = [get_design_residues(row, motif_res_col="motif_residues", cat_res_col="fixed_residues", lig_chain=args.ligand_chain) for index, row in ensembles.poses_df.iterrows()]
@@ -497,8 +518,17 @@ def main(args):
         # refine
         ensembles.poses_df["fastdesign_opts"] = [write_fastdesign_opts(row, cycle=i, total_cycles=args.refinement_cycles, reference_location_col="updated_reference_frags_location", motif_res_col="motif_residues", cat_res_col="fixed_residues", designres_col=f"{c_pref}_mpnn_fixed_residues", resfile_col=f"{c_pref}_resfiles") for index, row in ensembles.poses_df.iterrows()]
         #ensembles.poses_df["refinement_opts"] = ensembles.poses_df["fr_pose_opts"].str.replace(" -parser:script_vars ", f" -parser:script_vars sd={str(0.5 + i)} ")
-        ensembles = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, fastrelax_pose_opts="fastdesign_opts", ref_pdb_col="updated_reference_frags_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True)
-        
+        ensembles = fr_mpnn_esmfold(ensembles, prefix=c_pref, n=fr_n, fastrelax_pose_opts="fastdesign_opts", ref_pdb_col="updated_reference_frags_location", mpnn_fixedres_col=f"{c_pref}_mpnn_fixed_residues", use_soluble_model=True, params_file=params_file)
+
+        # add back the ligand
+        lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"{c_pref}_lig_poses")
+
+        # remove outputs that have ligand clashes:
+        ensembles.poses_df[f"{c_pref}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pdb_path=pose, ligand_chain=args.ligand_chain, dist=1.5) for pose in ensembles.poses_df["poses"].to_list()]
+        fl = len(ensembles.poses_df)
+        ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_ligand_clash"] == False]
+        print(f"Removed {fl - len(ensembles.poses_df)} of {fl} poses from poses because of ligand clashes")
+
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
         esm_bb_ca_rmsd_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_bb_ca_rmsd"], c_pref)
@@ -535,10 +565,10 @@ def main(args):
     check_rmsd = ensembles.calc_motif_heavy_rmsd_df(ref_pdb="updated_reference_frags_location", ref_motif="fixed_residues", target_motif="fixed_residues", metric_prefix="check_postrelax_catres")
 
     # plot af2_stats:
-    cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_rmsd", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_fr_sap_score", "check_postrelax_catres_motif_heavy_rmsd"]
-    titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "Relax Min.\n Sidechain RMSD", "SAP Score", "check RMSD"]
-    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "SAP Score [AU]", "RMSD [\u00C5]"]
-    dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,5), (0,5), (0,150), (0,5)]
+    cols = [f"af2_top_plddt", "af2_mean_plddt", "af2_bb_ca_rmsd", "af2_bb_ca_motif_rmsd", "af2_catres_motif_heavy_rmsd", "post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "post_refinement_rmsdcheck_sidechain_motif_heavy_rmsd"]
+    titles = ["Top AF2-pLDDT", "Mean AF2-pLDDT", "AF2 BB-Ca RMSD", "AF2 Motif-Ca RMSD", "AF2 Catres\nSidechain RMSD", "Relax Mean\nSidechain RMSD", "Relax Min.\n Sidechain RMSD"]
+    y_labels = ["pLDDT", "pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]", "RMSD [\u00C5]"]
+    dims = [(0,100), (0,100), (0,5), (0,5), (0,5), (0,5), (0,5)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plot_dir}/af2_stats.png")
     
     # superimpose poses on reference frags and calculate ligand scores:
@@ -547,16 +577,35 @@ def main(args):
         lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"final_redesign_lig_poses")
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_refinement", ligand_chain=args.ligand_chain)
 
-    #print(len(ensembles.poses_df))
+    # Ligand added back in, now run GALigandDock:
+    #docking_options = f"-parser:protocol {args.docking_protocol} -parser:script_vars ligchain={args.ligand_chain}"
+    #docked_poses = rosetta_scripts_and_mean(ensembles, prefix="final_dock", n=15, options=docking_options, pose_options=None, filter_scoreterm="final_dock_dG", scoreterms=None)
 
     # remove any structures that have an AF2 pLDDT below 85, Ca RMSD > 1
     #ensembles.poses_df = ensembles.poses_df[(ensembles.poses_df["af2_top_plddt"] <= 85) & (ensembles.poses_df["af2_bb_ca_rmsd"] <= 1) & (ensembles.poses_df["af2_bb_ca_motif_rmsd"] <= 1.5)]
+    
+    # store poses before final downsampling
+    #os.makedirs((docked_poses_dir := f"{ensembles.dir}/docked_poses/"), exist_ok=True)
+    #ensembles.dump_poses(docked_poses_dir)
+    #ensembles.poses_df.to_json(f"{docked_poses_dir}/docked_scores.json")
 
-    #print(len(ensembles.poses_df))
 
+    # calc perres Rosetta stats
+    ensembles.poses_df["post_refinement_rmsdcheck_total_score_perres"] = ensembles.poses_df["post_refinement_rmsdcheck_fr_total_score"] / ensembles.poses_df["post_refinement_rmsdcheck_fr_all_selection_count"]
+    ensembles.poses_df["perres_core_fa_atr"] = ensembles.poses_df["post_refinement_rmsdcheck_fr_total_energy"] / ensembles.poses_df["post_refinement_rmsdcheck_fr_core_selection_count"]
+    ensembles.poses_df["perres_contacts"] = ensembles.poses_df["post_refinement_rmsdcheck_fr_contacts"] / ensembles.poses_df["post_refinement_rmsdcheck_fr_all_selection_count"]
+    ensembles.poses_df["perres_sap"] = ensembles.poses_df["post_refinement_rmsdcheck_fr_sap_score"] / ensembles.poses_df["post_refinement_rmsdcheck_fr_all_selection_count"]
+
+    # plot Rosetta stats:
+    cols_r = ["post_refinement_rmsdcheck_total_score_perres", "perres_core_fa_atr", "perres_contacts", "perres_sap"]
+    titles_r = ["Total Score", "Core Stability", "Atomic Density", "SAP Score"]
+    y_labels_r = ["[REU] / residue", "fa_atr [REU] / residue", "count", "SAP / residue"]
+    dims_r = [(-5, 0), (-12, 0), (0, 5), (0, 1.5)]
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols_r, titles=titles_r, y_labels=y_labels_r, dims=dims_r, out_path=f"{plot_dir}/rosetta_final_stats.png")
+  
     # final backbone downsampling
-    final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.5])
-    final_downsampling = ensembles.filter_poses_by_score(1, f"final_downsampling_comp_score", prefix=f"output_filter", remove_layers=2, plot=[f"final_downsampling_comp_score", f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "af2_bb_ca_rmsd", "af2_mean_plddt", "post_refinement_rmsdcheck_fr_sap_score"])
+    final_downsampling_score = ensembles.calc_composite_score(f"final_downsampling_comp_score", [f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", f"af2_bb_ca_motif_rmsd", f"af2_mean_plddt", f"post_refinement_rmsdcheck_fr_sap_score"], [1, 0.25, -0.25, 0.25])
+    final_downsampling = ensembles.filter_poses_by_score(1, f"final_downsampling_comp_score", prefix=f"output_filter", remove_layers=3, plot=[f"final_downsampling_comp_score", f"post_refinement_rmsdcheck_mean_sidechain_motif_heavy_rmsd", "af2_bb_ca_rmsd", "af2_mean_plddt", "post_refinement_rmsdcheck_fr_sap_score"])
 
     # make new results, copy fragments and write alignment_script
     results_dir = f"{args.output_dir}/results/"
@@ -565,13 +614,20 @@ def main(args):
     ensembles.dump_poses(results_dir)
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{plot_dir}/af2_final_stats.png")
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=f"{results_dir}/af2_final_stats.png")
+    _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols_r, titles=titles_r, y_labels=y_labels_r, dims=dims_r, out_path=f"{results_dir}/rosetta_final_stats.png")
 
     # Copy and rewrite Fragments into output_dir/reference_fragments
     updated_ref_pdbs = update_and_copy_reference_frags(ensembles.poses_df, ref_col="input_poses", desc_col="poses_description", motif_prefix="rfdiffusion", out_pdb_path=ref_frag_dir, keep_ligand_chain=args.ligand_chain)
 
     # Write PyMol Alignment Script
     ref_originals = [shutil.copy(ref_pose, f"{results_dir}/") for ref_pose in ensembles.poses_df["input_poses"].to_list()]
-    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"final_downsampling_comp_score", top_n=args.num_outputs, path_to_script=f"{results_dir}/align.pml")
+    pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"final_downsampling_comp_score", top_n=len(ensembles.poses_df), path_to_script=f"{results_dir}/align.pml")
+
+    # write csv file for coupled-moves
+    csv_df = pd.DataFrame(ensembles.poses_df["poses_description"])
+    csv_df["continue"] = ["" for i in list(csv_df["poses_description"])]
+    csv_df["mutations"] = ["" for i in list(csv_df["poses_description"])]
+    csv_df.to_csv(f"{results_dir}/coupled_moves_input_selection.csv")
 
     print("done")
 
@@ -601,6 +657,9 @@ if __name__ == "__main__":
     argparser.add_argument("--decentralize", type=float, default=2, help="Set this value higher if you want your substrate more buried.")
     argparser.add_argument("--custom_diffusion_center", type=str, default="False", help="Do you want to use a custom center for diffusion?")
 
+    # rosetta
+    argparser.add_argument("--params_file", type=str, default=None, help="Path to a custom params file, if you want Rosetta to use your params file.")
+
     # linkers
     argparser.add_argument("--flanking", type=str, default="split", help="Overwrites contig output of 'run_ensemble_evaluator.py'. Can be either 'split', 'nterm', 'cterm'")
     argparser.add_argument("--total_flanker_length", type=int, default=40, help="Overwrites contig output of 'run_ensemble_evaluator.py'. Set the max length of the pdb-file that is being hallucinated. Will only be used in combination with 'flanking'")
@@ -619,6 +678,9 @@ if __name__ == "__main__":
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of your ligand chain.")
     argparser.add_argument("--num_outputs", type=int, default=20, help="Number of .pdb-files you would like to have as output.")
     argparser.add_argument("--filter_results_by_backbone", type=bool, default=True, help="Output only one structure per refinement input backbone.")
+
+    # docking
+    argparser.add_argument("--docking_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/GA_dock.xml", help="RosettaScript that executes ligand docking.")
     args = argparser.parse_args()
 
     main(args)
