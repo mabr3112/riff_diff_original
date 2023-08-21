@@ -86,7 +86,7 @@ def write_fastdesign_opts(row: pd.Series, cycle: int, total_cycles: int, referen
 def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inputs:int=8, num_esm_outputs_per_input_backbone:int=1, motif_ref_pdb_col:str=None, bb_rmsd_col:str=None, rmsd_weight:float=1, mpnn_fixedres_col:str=None, use_soluble_model=False, ref_motif_col:str="motif_residues", motif_col:str="motif_residues", ref_catres_motif_col:str="fixed_residues", catres_motif_col:str="fixed_residues", disfavor_alanines:int=1, calc_perplexity=False):
     '''AAA'''
     # Run MPNN and filter (by half)
-    mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues", use_soluble_model=use_soluble_model)
+    mpnn_designs = poses.mpnn_design(mpnn_options=f"--num_seq_per_target={num_mpnn_seqs} --sampling_temp=0.1 --omit_AAs=C", prefix=f"{prefix}_mpnn", fixed_positions_col=mpnn_fixedres_col or "fixed_residues", use_soluble_model=use_soluble_model)
     poses.poses_df[f"{prefix}_alanine_content"] = poses.poses_df[f"{prefix}_mpnn_sequence"].str.count("A") / poses.poses_df[f"{prefix}_mpnn_sequence"].str.len()
     alanine_content_weight = (poses.poses_df[f"{prefix}_alanine_content"].mean() - 0.1) * 8 * disfavor_alanines 
     print(f"alanine_content_weight: {alanine_content_weight}")
@@ -94,17 +94,21 @@ def mpnn_design_and_esmfold(poses, prefix:str, num_mpnn_seqs:int=20, num_esm_inp
     # calc composite score between MPNN score and alanine content:
     mpnn_compscore = poses.calc_composite_score(f"{prefix}_mpnn_compscore", [f"{prefix}_mpnn_score", f"{prefix}_alanine_content"], [1, alanine_content_weight])
     mpnn_seqfilter = poses.filter_poses_by_score(num_esm_inputs, f"{prefix}_mpnn_compscore", prefix=f"{prefix}_mpnn_seqfilter", remove_layers=1, plot=[f"{prefix}_mpnn_score", f"{prefix}_alanine_content"])
+    print(f"mpnn_design_and_esmfold, after mpnn filtering: {len(poses.poses_df['poses'])}")
 
     # Run ESMFold and calc bb_ca_rmsd, motif_ca_rmsd and motif_heavy RMSD
     if calc_perplexity: esm_singlepass_logprobs = poses.calc_esm2_pseudo_perplexity(options="--singlepass True", prefix=f"round1_singlepass", max_cores=1000)
     esm_preds = poses.predict_sequences(run_ESMFold, prefix=f"{prefix}_esm")
+    print(f"mpnn_design_and_esmfold, After prediction: {len(poses.poses_df['poses'])}")
     esm_bb_ca_rmsds = poses.calc_bb_rmsd_df(ref_pdb=bb_rmsd_col, metric_prefix=f"{prefix}_esm")
     esm_motif_rmsds = poses.calc_motif_bb_rmsd_df(ref_pdb=motif_ref_pdb_col, ref_motif=ref_motif_col, target_motif=motif_col, metric_prefix=f"{prefix}_esm_bb_ca")
     esm_motif_heavy_rmsds = poses.calc_motif_heavy_rmsd_df(ref_pdb=motif_ref_pdb_col, ref_motif=ref_catres_motif_col, target_motif=catres_motif_col, metric_prefix=f"{prefix}_esm_catres")
 
     # Filter Redesigns based on confidence and RMSDs
+    print(f"mpnn_design_and_esmfold, Before filtering: {len(poses.poses_df['poses'])}")
     esm_comp_score = poses.calc_composite_score(f"{prefix}_esm_comp_score", [f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_motif_rmsd"], [-1, rmsd_weight])
     esm_filter = poses.filter_poses_by_score(num_esm_outputs_per_input_backbone, f"{prefix}_esm_comp_score", remove_layers=1, prefix=f"{prefix}_esm_filter", plot=[f"{prefix}_esm_comp_score", f"{prefix}_esm_plddt", f"{prefix}_esm_bb_ca_rmsd", f"{prefix}_esm_bb_ca_motif_rmsd", f"{prefix}_esm_catres_motif_heavy_rmsd"])
+    print(f"mpnn_design_and_esmfold, After filtering: {len(poses.poses_df['poses'])}")
     
     # Plot Results
     if not os.path.isdir((plotdir := f"{poses.dir}/plots")): os.makedirs(plotdir, exist_ok=True)
@@ -265,8 +269,8 @@ def calc_ligand_stats(input_df: pd.DataFrame, ref_frags_col:str, ref_motif_col:s
 
     # calculate statistics of ligands:
     loaded_poses = [utils.biopython_tools.load_structure_from_pdbfile(pose) for pose in poses]
-    input_df[f"{prefix}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, dist=2.5, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
-    input_df[f"{prefix}_peratom_ligand_contacts"] = [utils.metrics.calc_ligand_contacts_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, d_0=3.5, r_0=3.5, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
+    input_df[f"{prefix}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, dist=1.8, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
+    input_df[f"{prefix}_peratom_ligand_contacts"] = [utils.metrics.calc_ligand_contacts_of_pdb(pose, ligand_chain=ligand_chain, ligand_pdb_path=ref_pose, d_0=3.4, r_0=3.5, ignore_atoms=["H"]) for pose, ref_pose in zip(input_df["poses"].to_list(), input_df[ref_frags_col].to_list())]
 
     # calculate pocket scores
     input_df[f"{prefix}_pocket_score"] = [utils.metrics.calc_pocket_score(pose, ligand_chain=ligand_chain, rep_weight=4, coordination_strength=5, coordination_radius=8) for pose in loaded_poses]
@@ -396,8 +400,8 @@ def main(args):
 
     # calculate ROG and contacts:
     ensembles.poses_df["rfdiffusion_rog"] = [metrics.calc_rog_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
-    ensembles.poses_df["rfdiffusion_contacts_short"] = [metrics.calc_intra_contacts_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
-    ensembles.poses_df["rfdiffusion_contacts_long"] = [metrics.calc_intra_contacts_of_pdb(pose, d_0=3.9, r_0=3.9) for pose in ensembles.poses_df["poses"].to_list()]
+    #ensembles.poses_df["rfdiffusion_contacts_short"] = [metrics.calc_intra_contacts_of_pdb(pose) for pose in ensembles.poses_df["poses"].to_list()]
+    #ensembles.poses_df["rfdiffusion_contacts_long"] = [metrics.calc_intra_contacts_of_pdb(pose, d_0=3.9, r_0=3.9) for pose in ensembles.poses_df["poses"].to_list()]
 
     # Calculate RMSD and composite score:
     diffusion_template_rmsd = ensembles.calc_motif_bb_rmsd_dir(ref_pdb_dir=pdb_dir, ref_motif=list(ensembles.poses_df["template_motif"]), target_motif=list(ensembles.poses_df["motif_residues"]), metric_prefix="rfdiffusion_template_bb_ca", remove_layers=1)
@@ -456,6 +460,7 @@ def main(args):
         calc_ligand_stats(input_df=ensembles.poses_df, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix="post_esm", ligand_chain=args.ligand_chain)
 
     # remove poses that have ligand clashes:
+    print(f"Removing {len(ensembles.poses_df[ensembles.poses_df['post_esm_ligand_clash'] == True])} poses from poses_df because of Ligand Clashes." )
     ensembles.poses_df = ensembles.poses_df[ensembles.poses_df["post_esm_ligand_clash"] == False]
     ensembles.poses_df["post_esm_rog"] = [utils.metrics.calc_rog_of_pdb(pose) for pose in ensembles.poses_df["poses"]]
 
@@ -519,9 +524,11 @@ def main(args):
         lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"{c_pref}_lig_poses")
 
         # remove outputs that have ligand clashes:
-        ensembles.poses_df[f"{c_pref}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pdb_path=pose, ligand_chain=args.ligand_chain, dist=2.4) for pose in ensembles.poses_df["poses"].to_list()]
+        ensembles.poses_df[f"{c_pref}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pdb_path=pose, ligand_chain=args.ligand_chain, dist=1.5) for pose in ensembles.poses_df["poses"].to_list()]
+        fl = len(ensembles.poses_df)
         ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_ligand_clash"] == False]
-        
+        print(f"Removed {fl - len(ensembles.poses_df)} of {fl} poses from poses because of ligand clashes")
+
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
         esm_bb_ca_rmsd_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_bb_ca_rmsd"], c_pref)
@@ -593,7 +600,7 @@ def main(args):
     cols_r = ["post_refinement_rmsdcheck_total_score_perres", "perres_core_fa_atr", "perres_contacts", "perres_sap"]
     titles_r = ["Total Score", "Core Stability", "Atomic Density", "SAP Score"]
     y_labels_r = ["[REU] / residue", "fa_atr [REU] / residue", "count", "SAP / residue"]
-    dims_r = [(-5, 0), (-6, 0), (0, 5), (0, 1.5)]
+    dims_r = [(-5, 0), (-12, 0), (0, 5), (0, 1.5)]
     _ = plots.violinplot_multiple_cols(ensembles.poses_df, cols=cols_r, titles=titles_r, y_labels=y_labels_r, dims=dims_r, out_path=f"{plot_dir}/rosetta_final_stats.png")
   
     # final backbone downsampling

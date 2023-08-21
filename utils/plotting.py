@@ -84,8 +84,10 @@ class PlottingTrajectory():
         else: fig.show()
         return None
         
-    def add_and_plot(self, data_list, label):
+    def add_and_plot(self, data_list: list, label: str) -> None:
         ''''''
+        if not type(data_list) == list:
+            data_list = list(data_list)
         self.add(data_list, label)
         self.violin_plot(out_path=self.location)
         return None

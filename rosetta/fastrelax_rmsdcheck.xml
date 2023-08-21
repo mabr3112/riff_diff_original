@@ -8,6 +8,7 @@
 	</SCOREFXNS>
 	<RESIDUE_SELECTORS>
 		<Layer name="surface" select_surface="true" />
+		<Chain name="prot" chains="A" />
 		Index name="motif" resnums="%%motif_idx%%" error_on_out_of_bounds_index="false"/>	
 	</RESIDUE_SELECTORS>
 	<TASKOPERATIONS>
@@ -16,6 +17,8 @@
 	</MOVE_MAP_FACTORIES>
 	<SIMPLE_METRICS>
 		<SapScoreMetric name="sapscore" />
+		<SelectedResidueCountMetric name="core_res_count" custom_type="core" residue_selector="NOT surface" />
+		<SelectedResidueCountMetric name="total_res_count" custom_type="all" residue_selector="prot" />
 		PerResidueEnergyMetric name="beta_per_res" scorefxn="beta_nov16" residue_selector=""/>
 		ResidueSummaryMetric metric="beta_per_res" custom_type="beta_nov16" action="mean"/>
 		<TotalEnergyMetric name="core_interaction_fa_atr" residue_selector="NOT surface" scoretype="fa_atr" scorefxn="beta" />
@@ -25,7 +28,7 @@
 	</FILTERS>
 	<MOVERS>
 		<PyMOLMover name="pmm" keep_history="1" />
-		<RunSimpleMetrics name="calc_proteinscores" metrics="sapscore,core_interaction_fa_atr" />
+		<RunSimpleMetrics name="calc_proteinscores" metrics="sapscore,core_interaction_fa_atr,core_res_count,total_res_count" />
 		<VirtualRoot name="set_virtual_root" />
 		<AddConstraints name="add_bb_ca_cst" >
                         <CoordinateConstraintGenerator name="set_bb_ca_constraint" native="false" ca_only="true" />
