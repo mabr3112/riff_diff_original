@@ -524,10 +524,15 @@ def main(args):
         lig_poses = ensembles.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix=f"{c_pref}_lig_poses")
 
         # remove outputs that have ligand clashes:
-        ensembles.poses_df[f"{c_pref}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pdb_path=pose, ligand_chain=args.ligand_chain, dist=1.5) for pose in ensembles.poses_df["poses"].to_list()]
-        fl = len(ensembles.poses_df)
-        ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_ligand_clash"] == False]
-        print(f"Removed {fl - len(ensembles.poses_df)} of {fl} poses from poses because of ligand clashes")
+        if args.high_resolution_clash_detection.lower() == "true":
+            print(f"Running high resolution ligand clash detection.")
+
+        else:
+            print(f"Running low resolution ligand clash detection with detection radius {args.refinement_ligand_clash_dist} Angstrom.")
+            ensembles.poses_df[f"{c_pref}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pdb_path=pose, ligand_chain=args.ligand_chain, dist=args.refinement_ligand_clash_dist) for pose in ensembles.poses_df["poses"].to_list()]
+            fl = len(ensembles.poses_df)
+            ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_ligand_clash"] == False]
+            print(f"Removed {fl - len(ensembles.poses_df)} of {fl} poses from poses because of ligand clashes")
 
         # plot
         esm_plddt_traj.add_and_plot(ensembles.poses_df[f"{c_pref}_esm_plddt"], c_pref)
@@ -678,6 +683,10 @@ if __name__ == "__main__":
     argparser.add_argument("--ligand_chain", type=str, default="Z", help="Chain name of your ligand chain.")
     argparser.add_argument("--num_outputs", type=int, default=20, help="Number of .pdb-files you would like to have as output.")
     argparser.add_argument("--filter_results_by_backbone", type=bool, default=True, help="Output only one structure per refinement input backbone.")
+
+    # refinement opts:
+    argparser.add_argument("--high_resolution_clash_detection", type=str, default="False", help="Run Adrian's high resolution ligand clash detection (calculates VdW radii)")
+    argparser.add_argument("--refinement_ligand_clash_dist", type=float, default=1.5, help="Default distance to calculate ligand clashes during refinement for vanilla clash detection")
 
     # docking
     argparser.add_argument("--docking_protocol", type=str, default="/home/mabr3112/riff_diff/rosetta/GA_dock.xml", help="RosettaScript that executes ligand docking.")
