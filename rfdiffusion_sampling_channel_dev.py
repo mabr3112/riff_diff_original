@@ -9,6 +9,7 @@ from glob import glob
 import os
 import pandas as pd
 import shutil
+import itertools
 
 # import custom modules
 from iterative_refinement import *
@@ -20,6 +21,101 @@ import utils.metrics as metrics
 import superimposition_tools
 from protocols.composite_protocols import calculate_fastrelax_sidechain_rmsd
 from protocols.composite_protocols import rosetta_scripts_and_mean
+
+### ADRIAN'S LIGAND CLASH DETECTION ####
+def split_pdb_numbering(pdbnum: str) -> list[int,str]:
+    resnum = ""
+    chain = ""
+    for char in pdbnum:
+        if char.isdigit():
+            resnum += char
+        else:
+            chain += char
+    resnum = int(resnum)
+    if not chain:
+        chain = "A"
+    return [resnum, chain]
+
+def clash_detection(poses, ref_frags_col:str, ref_motif_col:str, poses_motif_col:str, prefix:str, ligand_chain:str="Z", database_dir="database", bb_clash_vdw_multiplier=0.9, save_path_list=None) -> None:
+    '''
+    Superimposes the poses onto reference fragments in input_df[ref_frags_col] by specified motifs in input_df. Then calculates statistics over ligands. (if it is clashing and the number of contacts).
+    '''
+    scorefilepath = os.path.join(poses.scores_dir, f"{prefix}_ligand_clash.json")
+    if f"{prefix}_ligand_clash" in poses.poses_df.columns:
+        print('Ligand stats found in dataframe. Skipping step.')
+        return poses
+    if os.path.isfile(scorefilepath):
+        print(f'Ligand stats found at {scorefilepath}. Skipping step. ')
+        clash_df = pd.read_json(scorefilepath)
+        poses.poses_df = poses.poses_df.merge(clash_df, on="poses_description")
+        return poses
+    # superimpose reference frags onto poses to make sure ligand calculation works in the same coordinate frame:
+    if save_path_list:
+        poses_path = [superimposition_tools.superimpose_pdb_by_motif(ref_frag, pose, fixed_motif=ref_motif, mobile_motif=pose_motif, atoms=["CA"], save_path=path) for pose, ref_frag, pose_motif, ref_motif, path in zip(poses.poses_df["poses"].to_list(), poses.poses_df[ref_frags_col].to_list(), poses.poses_df[poses_motif_col].to_list(), poses.poses_df[ref_motif_col].to_list(), save_path_list)]
+        poses.poses_df['poses'] = save_path_list
+    else:
+        poses_path = [superimposition_tools.superimpose_pdb_by_motif(ref_frag, pose, fixed_motif=ref_motif, mobile_motif=pose_motif, atoms=["CA"]) for pose, ref_frag, pose_motif, ref_motif in zip(poses.poses_df["poses"].to_list(), poses.poses_df[ref_frags_col].to_list(), poses.poses_df[poses_motif_col].to_list(), poses.poses_df[ref_motif_col].to_list())]
+    structs = []
+    ligands = []
+    covalent_bonds = []
+    for index, row in poses.poses_df.iterrows():
+        structs.append(utils.import_structure_from_pdb(row['poses']))
+        ligands.append(utils.import_structure_from_pdb(row[ref_frags_col])[0][ligand_chain])
+        try:
+            covalent_bonds.append(row['covalent_bonds'])
+        except:
+            covalent_bonds.append(None)
+    vdw_radii = import_vdw_radii(database_dir)
+    # calculate statistics of ligands:
+    poses.poses_df[f"{prefix}_ligand_clash"] = [distance_detection(struct, ligand, vdw_radii, True, True, bb_clash_vdw_multiplier, covalent_bond) for struct, ligand, covalent_bond in zip(structs, ligands, covalent_bonds)]
+    poses.poses_df[['poses_description', f"{prefix}_ligand_clash"]].to_json(scorefilepath)
+    return poses
+
+def distance_detection(entity1, entity2, vdw_radii:dict, bb_only:bool=True, ligand:bool=False, clash_detection_vdw_multiplier:float=1.0, covalent_bond:str=None, ignore_func_groups:bool=True):
+    '''
+    checks for clashes by comparing VanderWaals radii. If clashes with ligand should be detected, set ligand to true. Ligand chain must be added as second entity.
+    bb_only: only detect backbone clashes between to proteins or a protein and a ligand.
+    clash_detection_vdw_multiplier: multiply Van der Waals radii with this value to set clash detection limits higher/lower
+    database: path to database directory
+    '''
+    backbone_atoms = ['CA', 'C', 'N', 'O', 'H']
+    if bb_only == True and ligand == False:
+        entity1_atoms = (atom for atom in entity1.get_atoms() if atom.name in backbone_atoms)
+        entity2_atoms = (atom for atom in entity2.get_atoms() if atom.name in backbone_atoms)
+    elif bb_only == True and ligand == True:
+        entity1_atoms = (atom for atom in entity1.get_atoms() if atom.name in backbone_atoms)
+        entity2_atoms = (atom for atom in entity2.get_atoms())
+    else:
+        entity1_atoms = (atom for atom in entity1.get_atoms())
+        entity2_atoms = (atom for atom in entity2.get_atoms())
+    for atom_combination in itertools.product(entity1_atoms, entity2_atoms):
+        #skip clash detection for covalent bonds
+        covalent = False
+        if covalent_bond:
+            for cov_bond in covalent_bond.split(','):
+                resnum, chain = split_pdb_numbering(cov_bond.split('_')[0])
+                if atom_combination[0].get_parent().id[1] == resnum and atom_combination[0].get_parent().get_parent().id == chain and atom_combination[0].name == cov_bond.split(':')[0].split('_')[-1] and atom_combination[1].name == cov_bond.split(':')[1].split('_')[-1]:
+                    covalent = True
+        if covalent == True:
+            continue
+        distance = atom_combination[0] - atom_combination[1]
+        element1 = atom_combination[0].element
+        element2 = atom_combination[1].element
+        clash_detection_limit = clash_detection_vdw_multiplier * (vdw_radii[str(element1)] + vdw_radii[str(element2)])
+        if distance < clash_detection_limit:
+            return True
+    return False
+
+def import_vdw_radii(database_dir):
+    '''
+    from https://en.wikipedia.org/wiki/Atomic_radii_of_the_elements_(data_page), accessed 30.1.2023
+    '''
+    vdw_radii = pd.read_csv(f'{database_dir}/vdw_radii.csv')
+    vdw_radii.drop(['name', 'atomic_number', 'empirical', 'Calculated', 'Covalent(sb)', 'Covalent(tb)', 'Metallic'], axis=1, inplace=True)
+    vdw_radii.dropna(subset=['VdW_radius'], inplace=True)
+    vdw_radii['VdW_radius'] = vdw_radii['VdW_radius'] / 100
+    vdw_radii = vdw_radii.set_index('element')['VdW_radius'].to_dict()
+    return vdw_radii
 
 def fr_mpnn_esmfold(poses, prefix:str, n:int, fastrelax_pose_opts="fr_pose_opts", ref_pdb_col:str=None, ref_motif_col="motif_residues", mpnn_fixedres_col:str=None, use_soluble_model:bool=False, params_file:str=None) -> Poses:
     '''AAA'''
@@ -526,7 +622,9 @@ def main(args):
         # remove outputs that have ligand clashes:
         if args.high_resolution_clash_detection.lower() == "true":
             print(f"Running high resolution ligand clash detection.")
-
+            ensembles = clash_detection(ensembles, ref_frags_col="updated_reference_frags", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix=f"{c_pref}_highres", ligand_chain=args.ligand_chain, database_dir="database", bb_clash_vdw_multiplier=args.bb_clash_vdw_multiplier, save_path_list=None)
+            ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_highres_ligand_clash"] == False]
+            print(f"Removed {fl - len(ensembles.poses_df)} of {fl} poses from poses because of ligand clashes")
         else:
             print(f"Running low resolution ligand clash detection with detection radius {args.refinement_ligand_clash_dist} Angstrom.")
             ensembles.poses_df[f"{c_pref}_ligand_clash"] = [utils.metrics.check_for_ligand_clash_of_pdb(pdb_path=pose, ligand_chain=args.ligand_chain, dist=args.refinement_ligand_clash_dist) for pose in ensembles.poses_df["poses"].to_list()]
@@ -686,6 +784,7 @@ if __name__ == "__main__":
 
     # refinement opts:
     argparser.add_argument("--high_resolution_clash_detection", type=str, default="False", help="Run Adrian's high resolution ligand clash detection (calculates VdW radii)")
+    argparser.add_argument("--bb_clash_vdw_multiplier", default=0.9, type=float, help="vdw multiplier for bb clash detection during refinement.")
     argparser.add_argument("--refinement_ligand_clash_dist", type=float, default=1.5, help="Default distance to calculate ligand clashes during refinement for vanilla clash detection")
 
     # docking
