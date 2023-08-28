@@ -622,7 +622,7 @@ def main(args):
         # remove outputs that have ligand clashes:
         if args.high_resolution_clash_detection.lower() == "true":
             print(f"Running high resolution ligand clash detection.")
-            ensembles = clash_detection(ensembles, ref_frags_col="updated_reference_frags", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix=f"{c_pref}_highres", ligand_chain=args.ligand_chain, database_dir="database", bb_clash_vdw_multiplier=args.bb_clash_vdw_multiplier, save_path_list=None)
+            ensembles = clash_detection(ensembles, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix=f"{c_pref}_highres", ligand_chain=args.ligand_chain, database_dir="database", bb_clash_vdw_multiplier=args.bb_clash_vdw_multiplier, save_path_list=None)
             ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_highres_ligand_clash"] == False]
             print(f"Removed {fl - len(ensembles.poses_df)} of {fl} poses from poses because of ligand clashes")
         else:
@@ -784,7 +784,7 @@ if __name__ == "__main__":
 
     # refinement opts:
     argparser.add_argument("--high_resolution_clash_detection", type=str, default="False", help="Run Adrian's high resolution ligand clash detection (calculates VdW radii)")
-    argparser.add_argument("--bb_clash_vdw_multiplier", default=0.9, type=float, help="vdw multiplier for bb clash detection during refinement.")
+    argparser.add_argument("--bb_clash_vdw_multiplier", default=0.7, type=float, help="vdw multiplier for bb clash detection during refinement.")
     argparser.add_argument("--refinement_ligand_clash_dist", type=float, default=1.5, help="Default distance to calculate ligand clashes during refinement for vanilla clash detection")
 
     # docking
