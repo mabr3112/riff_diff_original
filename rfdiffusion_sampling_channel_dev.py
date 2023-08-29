@@ -21,6 +21,7 @@ import utils.metrics as metrics
 import superimposition_tools
 from protocols.composite_protocols import calculate_fastrelax_sidechain_rmsd
 from protocols.composite_protocols import rosetta_scripts_and_mean
+import utils.adrian_utils
 
 ### ADRIAN'S LIGAND CLASH DETECTION ####
 def split_pdb_numbering(pdbnum: str) -> list[int,str]:
@@ -59,8 +60,8 @@ def clash_detection(poses, ref_frags_col:str, ref_motif_col:str, poses_motif_col
     ligands = []
     covalent_bonds = []
     for index, row in poses.poses_df.iterrows():
-        structs.append(utils.import_structure_from_pdb(row['poses']))
-        ligands.append(utils.import_structure_from_pdb(row[ref_frags_col])[0][ligand_chain])
+        structs.append(utils.adrian_utils.import_structure_from_pdb(row['poses']))
+        ligands.append(utils.adrian_utils.import_structure_from_pdb(row[ref_frags_col])[0][ligand_chain])
         try:
             covalent_bonds.append(row['covalent_bonds'])
         except:
