@@ -46,29 +46,6 @@ def chainresdict_to_str(in_dict:dict):
             cat_res.append(f'{str(residue)+chain}')
     return ",".join(cat_res)
 
-def calculate_site_score(pose, motif, pose_catres, motif_catres, pose_residue_plddt):
-    pose = my_utils.import_structure_from_pdb(pose)
-    motif = my_utils.import_structure_from_pdb(motif)
-
-    pose_cat_atoms = extract_residues_from_structure(pose, pose_catres)
-    motif_cat_atoms = extract_residues_from_structure(motif, motif_catres)
-
-    Superimposer().set_atoms(pose_cat_atoms, motif_cat_atoms)
-    Superimposer().rotran
-    catres_rmsd = round(Superimposer().rms, 2)
-
-
-def extract_residue_atoms_from_structure(structure, chaindict):
-    res = []
-    for chain in chaindict:
-        for resnum in chaindict[chain]:
-            res.append(structure[0][chain][resnum])
-    atoms = []
-    for residue in res:
-        for atom in residue.get_atoms():
-            if atom.element in ['C', 'N', 'O', 'S']:
-                atoms.append(atom)
-    return atoms
 
 def superimpose_calc_ligand_rmsd(ref_pdbfile: str, target_pdbfile: str, ref_selection: dict, target_selection: dict, target_ligand_chain: str, ref_ligand_chain) -> float:
     '''
@@ -100,8 +77,8 @@ def superimpose_calc_ligand_rmsd(ref_pdbfile: str, target_pdbfile: str, ref_sele
     target_ligand = target_model[target_ligand_chain]
 
     # Extract ligand atoms
-    ref_lig_atoms = [atom for atom in ref_ligand.get_atoms()]
-    target_lig_atoms = [atom for atom in ref_ligand.get_atoms()]
+    ref_lig_atoms = sorted([atom for atom in ref_ligand.get_atoms()])
+    target_lig_atoms = sorted([atom for atom in ref_ligand.get_atoms()])
     
     # Make a list of the atoms (in the structures) you wish to align.
     ref_atoms = []
@@ -135,9 +112,10 @@ def calc_rmsd_without_superposition(entity1, entity2, rmsd_type:str='heavy'):
         atoms = ['N', 'CA', 'C', 'O']
     if rmsd_type == "CA":
         atoms = ['CA']
-    
-    ent1_atoms = [atom for atom in entity1.get_atoms()]
-    ent2_atoms = [atom for atom in entity2.get_atoms()]
+
+    #TODO: sorting like this might lead to issues when rmsd of multiple residues are calculated --> it should be fine for ligands
+    ent1_atoms = sorted([atom for atom in entity1.get_atoms()])
+    ent2_atoms = sorted([atom for atom in entity2.get_atoms()])
 
     if rmsd_type == 'heavy':
         ent1_atoms = [atom for atom in ent1_atoms if not atom.element == 'H']
@@ -151,29 +129,13 @@ def calc_rmsd_without_superposition(entity1, entity2, rmsd_type:str='heavy'):
 
     return round(rmsd, 2)
 
-def scatter_plot(x_values, y_values, x_label, y_label, file_path=None, x_upper=None, x_lower=None, y_upper=None, y_lower=None):
-    plt.figure()
-    plt.scatter(x_values, y_values)
-    plt.xlabel(x_label)
-    plt.ylabel(y_label)
-    if not x_upper == None:
-        plt.xlim(right=x_upper)
-    if not x_lower == None:
-        plt.xlim(left=x_lower)
-    if not y_upper == None:
-        plt.ylim(top=y_upper)
-    if not y_lower == None:
-        plt.ylim(bottom=y_lower)
-    plt.text(0.5, -0.1, f"Number of datapoints: {len(x_values)}", ha="center", transform=plt.gca().transAxes)
-    plt.savefig(file_path)
-
 
 
 def main(args):
 
     #absolute path for xml is necessary because coupled moves output can only be controlled by cd'ing into output directory before starting the run
     xml = os.path.abspath(args.protocol)
-
+    rotprob_xml = os.path.abspath(args.rotprob_protocol)
     df = pd.read_json(args.json)
 
     analysis = Poses(args.output_dir, df['poses'].to_list())
@@ -212,7 +174,7 @@ def main(args):
         print('Covalent bonds present! Adding LINK records to poses...')
         analysis.add_LINK_to_poses('covalent_bonds', 'rm_rx')
 
-
+    rotprob_opts = f"-parser:protocol {rotprob_xml} -ex1 -ex2 -ex3 -ex4"
     opts = f"-parser:protocol {xml}"
     if args.options:
         opts = opts + ' ' + args.options
@@ -222,7 +184,10 @@ def main(args):
     analysis.poses_df['analysis_input_poses_description'] = analysis.poses_df['poses_description']
     old_poses = copy.deepcopy(analysis)
 
-    #run analysis
+    #calculate rotamer probabilities
+    analysis.rosetta("rosetta_scripts.default.linuxgccrelease", options=rotprob_opts, pose_options=analysis.poses_df['analysis_options'].to_list(), n=1, prefix='rotprob')
+    analysis.reindex_poses("post_prob_reindexed", 1, False)
+    #relax structures
     analysis.rosetta("rosetta_scripts.default.linuxgccrelease", options=opts, pose_options=analysis.poses_df['analysis_options'].to_list(), n=args.nstruct, prefix='analysis')
     #calculate rmsds of ligand and catalytic residues post-relax
     analysis.calc_motif_heavy_rmsd_df('updated_reference_frags_location', 'fixed_residues', 'fixed_residues', 'analysis_catres')
@@ -234,33 +199,37 @@ def main(args):
         lig_rmsd_list.append(lig_rmsd)
     analysis.poses_df['analysis_ligand_rmsd'] = lig_rmsd_list
 
+    analysis.poses_df.to_json(analysis.scorefile)
 
     row_list = []
     for input, df in analysis.poses_df.groupby('analysis_input_poses_description', sort=False):
         analysis_dict = {}
-        for i in ['poses', 'analysis_input_poses', 'analysis_ligand_rmsd', 'analysis_catres_motif_heavy_rmsd', 'analysis_catres_bb_motif_rmsd', 'analysis_bb_ca_rmsd', 'analysis_total_score', 'analysis_rotprob', 'analysis_interaction_energy', 'analysis_sasa', 'analysis_sap_score']:
+        for i in ['analysis_ligand_rmsd', 'analysis_catres_motif_heavy_rmsd', 'analysis_catres_bb_motif_rmsd', 'analysis_bb_ca_rmsd', 'analysis_total_score', 'analysis_interaction_energy', 'analysis_sasa', 'analysis_sap_score']:
             analysis_dict[i] = df[i].to_list()
-        for i in ['analysis_ligand_rmsd', 'analysis_catres_motif_heavy_rmsd', 'analysis_catres_bb_motif_rmsd', 'analysis_bb_ca_rmsd', 'analysis_total_score', 'analysis_rotprob', 'analysis_interaction_energy', 'analysis_sasa', 'analysis_sap_score']:
-            analysis_dict[f"{i}_mean"] = df[i].mean()
-        analysis_dict['analysis_rotprob'] = [abs(rot_prob) for rot_prob in analysis_dict['analysis_rotprob']]
-        analysis_dict['analysis_rotprob_mean'] = abs(analysis_dict['analysis_rotprob_mean'])
+        for i in ['analysis_ligand_rmsd', 'analysis_catres_motif_heavy_rmsd', 'analysis_catres_bb_motif_rmsd', 'analysis_bb_ca_rmsd', 'analysis_total_score', 'analysis_interaction_energy', 'analysis_sasa', 'analysis_sap_score']:
+            analysis_dict[f"{i}_mean"] = round(df[i].mean(), 2)
+            analysis_dict[f"{i}_median"] = round(df[i].median(), 2)
+            analysis_dict[f"{i}_q25"] = round(df[i].quantile(q=0.25), 2)
         row = pd.Series(analysis_dict)
-        row.rename({'poses': 'analysis_relaxed_poses'}, inplace=True)
         row['poses_description'] = input
+        row['rotprob'] = (-1) * round(df['rotprob_rotprob'].mean(), 3)
         row_list.append(row)
     
     #create new dataframe and merge with old one
     new_df = pd.DataFrame(row_list)
     analysis.poses_df = new_df.merge(old_poses.poses_df, on='poses_description')
-    analysis.poses_df[['poses_description', "cm_predictions_af2_top_plddt", "post_cm_af2_bb_motif_rmsd", "post_cm_attn_catres_motif_heavy_rmsd", "post_cm_af2_motif_site_score", "post_cm_attn_catres_site_score", "esm_catres_site_score", "esm_motif_site_score", 'esm_bb_motif_rmsd', 'esm_catres_rmsd', 'af2_esm_combined_catres_sitescore', 'analysis_ligand_rmsd_mean', 'analysis_catres_motif_heavy_rmsd_mean', 'analysis_catres_bb_motif_rmsd_mean', 'analysis_bb_ca_rmsd_mean', 'analysis_total_score_mean', 'analysis_rotprob_mean', 'analysis_lig_delta_sasa_mean', 'analysis_interaction_energy_mean', 'analysis_sasa_mean', 'analysis_sap_score_mean']].to_csv(os.path.join(args.output_dir, "analysis_results.csv"))
+    analysis.poses_df[['poses_description', "cm_predictions_af2_top_plddt", "post_cm_af2_bb_motif_rmsd", "post_cm_attn_catres_motif_heavy_rmsd", "post_cm_af2_motif_site_score", "post_cm_attn_catres_site_score", "esm_catres_site_score", "esm_motif_site_score", 'esm_bb_motif_rmsd', 'esm_catres_rmsd', 'af2_esm_combined_catres_sitescore', 'analysis_ligand_rmsd_q25', 'analysis_catres_motif_heavy_rmsd_q25', 'analysis_catres_bb_motif_rmsd_q25', 'analysis_bb_ca_rmsd_q25', 'analysis_total_score_q25', 'rotprob', 'analysis_interaction_energy_q25', 'analysis_sasa_q25', 'analysis_sap_score_q25', 'poses']].to_csv(os.path.join(args.output_dir, "analysis_results.csv"))
 
 
-    #TODO: filter dataframe --> only output best structures, otherwise it will get overwhelming
     #create plots
     plot_path = os.path.join(args.output_dir, 'plots/')
-    for index, row in analysis.poses_df.iterrows():
-        scatter_lig_rmsd = scatter_plot(row['analysis_ligand_rmsd'], row['analysis_total_score'], 'RMSD [A]', 'total score [REU]', f"{plot_path}{row['poses_description']}_ligrmsd_totalscore.png", max(row['analysis_ligand_rmsd']), 0, max(row['analysis_total_score']), None)
-        scatter_catres_rmsd = scatter_plot(row['analysis_catres_motif_heavy_rmsd'], row['analysis_total_score'], 'RMSD [A]', 'total score [REU]', f"{plot_path}{row['poses_description']}_catressc_totalscore.png", max(row['analysis_catres_motif_heavy_rmsd']), 0, max(row['analysis_total_score']), None)
+
+    cols = ["cm_predictions_af2_top_plddt", "post_cm_attn_catres_motif_heavy_rmsd", "esm_catres_rmsd", "af2_esm_combined_catres_sitescore", "rotprob", "analysis_ligand_rmsd_q25", 'analysis_catres_motif_heavy_rmsd_q25', 'analysis_total_score_q25', 'analysis_interaction_energy_q25', 'analysis_sap_score_q25']
+    titles = ["AF2-pLDDT", "AF2 catres\n sidechain RMSD", "ESM catres\n sidechain RMSD", "combined site score", "catres rotamer\n probabilities", "q25 ligand RMSD", "RELAX q25 catres\n sidechain RMSD", "RELAX q25\n total score", "RELAX q25\n interaction score", "RELAX q25\n SAP score"]
+    y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "AU", "probability", "RMSD [\u00C5]", "RMSD [\u00C5]", "REU", "REU", "AU"]
+    dims = [(80,100), (0,2), (0,2), (0,1), (0,1), (0,10), (0,5), (analysis.poses_df['analysis_total_score_q25'].min(), analysis.poses_df['analysis_total_score_q25'].max()), (analysis.poses_df['analysis_interaction_energy_q25'].min(), analysis.poses_df['analysis_interaction_energy_q25'].max()), (analysis.poses_df['analysis_sap_score_q25'].min(), analysis.poses_df['analysis_sap_score_q25'].max())]
+    _ = plots.violinplot_multiple_cols(analysis.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=os.path.join(plot_path, "analysis.png"))
+
 
 
 
@@ -269,6 +238,7 @@ if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argparser.add_argument("--protocol", type=str, default='rosetta/analysis.xml', help="path to xmlfile that should be used for analysis")
+    argparser.add_argument("--rotprob_protocol", type=str, default='rosetta/rotamer_probabilities.xml', help="path to xmlfile that should be used for analysis")
     argparser.add_argument("--output_dir", type=str, required=True, help="working directory")
     argparser.add_argument("--max_cpus", type=int, default=320, help="maximum number of cpus for analysis")
     argparser.add_argument("--nstruct", type=int, default=50, help="analysis runs per input pdb")
