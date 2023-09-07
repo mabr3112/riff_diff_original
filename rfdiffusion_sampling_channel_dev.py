@@ -623,7 +623,7 @@ def main(args):
         if args.high_resolution_clash_detection.lower() == "true":
             print(f"Running high resolution ligand clash detection.")
             ensembles = clash_detection(ensembles, ref_frags_col="updated_reference_frags", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix=f"{c_pref}_highres", ligand_chain=args.ligand_chain, database_dir="database", bb_clash_vdw_multiplier=args.bb_clash_vdw_multiplier, save_path_list=None)
-            ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_highres_ligand_clash"] == False]
+            ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_highres_ligand_clash"] == False]a
             print(f"Removed {fl - len(ensembles.poses_df)} of {fl} poses from poses because of ligand clashes")
         else:
             print(f"Running low resolution ligand clash detection with detection radius {args.refinement_ligand_clash_dist} Angstrom.")
