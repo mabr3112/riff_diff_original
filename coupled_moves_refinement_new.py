@@ -32,6 +32,8 @@ import utils.pymol_tools
 from utils.plotting import PlottingTrajectory
 import utils.metrics as metrics
 import superimposition_tools as si_tools
+from protocols.composite_protocols import rosetta_scripts_and_mean
+
 
 def aa_three_or_one_letter_code(AA):
     letter_codes = {
@@ -994,6 +996,12 @@ def main(args):
     coupled_moves.poses_df['af2_perresidue_plddt_list'] = convert_af2_perresidue_plddt_to_list(coupled_moves.poses_df, 'cm_predictions_af2_top_plddt_list')
     coupled_moves = update_sitescore_with_bb_plddts(coupled_moves, 'post_cm_attn_catres_site_score', 'af2_perresidue_plddt_list', 'fixed_residues', f"post_cm_attn")
 
+    # if option is set, dock:
+    if args.run_docking.lower() == "true":
+        # add ligand:
+        lig_poses = coupled_moves.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix="docking_lig_poses")
+        docking_options = f"-parser:protocol {args.docking_protocol} -parser:script_vars ligchain={args.ligand_chain}"
+        docked_poses = rosetta_scripts_and_mean(coupled_moves, prefix="final_dock", n=15, options=docking_options, pose_options=None, filter_scoreterm="final_dock_dG", scoreterms=None)
 
     #filter output
     coupled_moves.poses_df['af2_esm_combined_catres_sitescore'] = coupled_moves.poses_df["post_cm_attn_sc_bb_site_score"] * coupled_moves.poses_df[f"esm_catres_site_score"]
@@ -1074,6 +1082,7 @@ if __name__ == "__main__":
 
     # docking options
     argparser.add_argument("--run_docking", default="False", type=str, help="Do you want to start a docking run with your final coupled moves outputs?")
+    argparser.add_argument("--docking_protocol", default="/home/mabr3112/riff_diff/rosetta/GA_dock.xml", type=str, help="Docking Protocol at the end of Coupled Moves.")
 
     args = argparser.parse_args()
 
