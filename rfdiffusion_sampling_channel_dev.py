@@ -21,6 +21,7 @@ import utils.metrics as metrics
 import superimposition_tools
 from protocols.composite_protocols import calculate_fastrelax_sidechain_rmsd
 from protocols.composite_protocols import rosetta_scripts_and_mean
+import utils.adrian_utils
 
 ### ADRIAN'S LIGAND CLASH DETECTION ####
 def split_pdb_numbering(pdbnum: str) -> list[int,str]:
@@ -59,8 +60,8 @@ def clash_detection(poses, ref_frags_col:str, ref_motif_col:str, poses_motif_col
     ligands = []
     covalent_bonds = []
     for index, row in poses.poses_df.iterrows():
-        structs.append(utils.import_structure_from_pdb(row['poses']))
-        ligands.append(utils.import_structure_from_pdb(row[ref_frags_col])[0][ligand_chain])
+        structs.append(utils.adrian_utils.import_structure_from_pdb(row['poses']))
+        ligands.append(utils.adrian_utils.import_structure_from_pdb(row[ref_frags_col])[0][ligand_chain])
         try:
             covalent_bonds.append(row['covalent_bonds'])
         except:
@@ -622,8 +623,9 @@ def main(args):
         # remove outputs that have ligand clashes:
         if args.high_resolution_clash_detection.lower() == "true":
             print(f"Running high resolution ligand clash detection.")
-            ensembles = clash_detection(ensembles, ref_frags_col="updated_reference_frags", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix=f"{c_pref}_highres", ligand_chain=args.ligand_chain, database_dir="database", bb_clash_vdw_multiplier=args.bb_clash_vdw_multiplier, save_path_list=None)
-            ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_highres_ligand_clash"] == False]a
+            fl = len(ensembles.poses_df)
+            ensembles = clash_detection(ensembles, ref_frags_col="updated_reference_frags_location", ref_motif_col="motif_residues", poses_motif_col="motif_residues", prefix=f"{c_pref}_highres", ligand_chain=args.ligand_chain, database_dir="database", bb_clash_vdw_multiplier=args.bb_clash_vdw_multiplier, save_path_list=None)
+            ensembles.poses_df = ensembles.poses_df[ensembles.poses_df[f"{c_pref}_highres_ligand_clash"] == False]
             print(f"Removed {fl - len(ensembles.poses_df)} of {fl} poses from poses because of ligand clashes")
         else:
             print(f"Running low resolution ligand clash detection with detection radius {args.refinement_ligand_clash_dist} Angstrom.")
@@ -727,8 +729,7 @@ def main(args):
     pymol_script = utils.pymol_tools.write_pymol_alignment_script(ensembles.poses_df, scoreterm=f"final_downsampling_comp_score", top_n=len(ensembles.poses_df), path_to_script=f"{results_dir}/align.pml")
 
     # write csv file for coupled-moves
-    csv_df = pd.DataFrame(ensembles.poses_df["poses_description"])
-    csv_df["continue"] = ["" for i in list(csv_df["poses_description"])]
+    csv_df = pd.DataFrame(ensembles.poses_df.sort_values(by="final_downsampling_comp_score")["poses_description"])
     csv_df["mutations"] = ["" for i in list(csv_df["poses_description"])]
     csv_df.to_csv(f"{results_dir}/coupled_moves_input_selection.csv")
 
@@ -784,7 +785,7 @@ if __name__ == "__main__":
 
     # refinement opts:
     argparser.add_argument("--high_resolution_clash_detection", type=str, default="False", help="Run Adrian's high resolution ligand clash detection (calculates VdW radii)")
-    argparser.add_argument("--bb_clash_vdw_multiplier", default=0.9, type=float, help="vdw multiplier for bb clash detection during refinement.")
+    argparser.add_argument("--bb_clash_vdw_multiplier", default=0.7, type=float, help="vdw multiplier for bb clash detection during refinement.")
     argparser.add_argument("--refinement_ligand_clash_dist", type=float, default=1.5, help="Default distance to calculate ligand clashes during refinement for vanilla clash detection")
 
     # docking

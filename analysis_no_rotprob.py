@@ -212,23 +212,26 @@ def main(args):
             analysis_dict[f"{i}_q25"] = round(df[i].quantile(q=0.25), 2)
         row = pd.Series(analysis_dict)
         row['poses_description'] = input
-        row['rotprob'] = (-1) * round(df['rotprob_rotprob'].mean(), 3)
+        #row['rotprob'] = (-1) * round(df['rotprob_rotprob'].mean(), 3)
         row_list.append(row)
     
     #create new dataframe and merge with old one
     new_df = pd.DataFrame(row_list)
     analysis.poses_df = new_df.merge(old_poses.poses_df, on='poses_description')
-    analysis.poses_df[['poses_description', "cm_predictions_af2_top_plddt", "post_cm_af2_bb_motif_rmsd", "post_cm_attn_catres_motif_heavy_rmsd", "post_cm_af2_motif_site_score", "post_cm_attn_catres_site_score", "esm_catres_site_score", "esm_motif_site_score", 'esm_bb_motif_rmsd', 'esm_catres_rmsd', 'af2_esm_combined_catres_sitescore', 'analysis_ligand_rmsd_q25', 'analysis_catres_motif_heavy_rmsd_q25', 'analysis_catres_bb_motif_rmsd_q25', 'analysis_bb_ca_rmsd_q25', 'analysis_total_score_q25', 'rotprob', 'analysis_interaction_energy_q25', 'analysis_sasa_q25', 'analysis_sap_score_q25', 'poses']].to_csv(os.path.join(args.output_dir, "analysis_results.csv"))
+    analysis.poses_df[['poses_description', "cm_predictions_af2_top_plddt", "post_cm_af2_bb_motif_rmsd", "post_cm_attn_catres_motif_heavy_rmsd", "post_cm_af2_motif_site_score", "post_cm_attn_catres_site_score", "esm_catres_site_score", "esm_motif_site_score", 'esm_bb_motif_rmsd', 'esm_catres_rmsd', 'af2_esm_combined_catres_sitescore', 'analysis_ligand_rmsd_q25', 'analysis_catres_motif_heavy_rmsd_q25', 'analysis_catres_bb_motif_rmsd_q25', 'analysis_bb_ca_rmsd_q25', 'analysis_total_score_q25', 'analysis_interaction_energy_q25', 'analysis_sasa_q25', 'analysis_sap_score_q25', 'poses']].to_csv(os.path.join(args.output_dir, "analysis_results.csv"))
 
 
     #create plots
     plot_path = os.path.join(args.output_dir, 'plots/')
 
-    cols = ["cm_predictions_af2_top_plddt", "post_cm_attn_catres_motif_heavy_rmsd", "esm_catres_rmsd", "af2_esm_combined_catres_sitescore", "rotprob", "analysis_ligand_rmsd_q25", 'analysis_catres_motif_heavy_rmsd_q25', 'analysis_total_score_q25', 'analysis_interaction_energy_q25', 'analysis_sap_score_q25']
-    titles = ["AF2-pLDDT", "AF2 catres\n sidechain RMSD", "ESM catres\n sidechain RMSD", "combined site score", "catres rotamer\n probabilities", "q25 ligand RMSD", "RELAX q25 catres\n sidechain RMSD", "RELAX q25\n total score", "RELAX q25\n interaction score", "RELAX q25\n SAP score"]
-    y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "AU", "probability", "RMSD [\u00C5]", "RMSD [\u00C5]", "REU", "REU", "AU"]
-    dims = [(80,100), (0,2), (0,2), (0,1), (0,1), (0,10), (0,5), (analysis.poses_df['analysis_total_score_q25'].min(), analysis.poses_df['analysis_total_score_q25'].max()), (analysis.poses_df['analysis_interaction_energy_q25'].min(), analysis.poses_df['analysis_interaction_energy_q25'].max()), (analysis.poses_df['analysis_sap_score_q25'].min(), analysis.poses_df['analysis_sap_score_q25'].max())]
+    cols = ["cm_predictions_af2_top_plddt", "post_cm_attn_catres_motif_heavy_rmsd", "esm_catres_rmsd", "af2_esm_combined_catres_sitescore", "analysis_ligand_rmsd_q25", 'analysis_catres_motif_heavy_rmsd_q25', 'analysis_total_score_q25', 'analysis_interaction_energy_q25', 'analysis_sap_score_q25']
+    titles = ["AF2-pLDDT", "AF2 catres\n sidechain RMSD", "ESM catres\n sidechain RMSD", "combined site score", "q25 ligand RMSD", "RELAX q25 catres\n sidechain RMSD", "RELAX q25\n total score", "RELAX q25\n interaction score", "RELAX q25\n SAP score"]
+    y_labels = ["pLDDT", "RMSD [\u00C5]", "RMSD [\u00C5]", "AU", "RMSD [\u00C5]", "RMSD [\u00C5]", "REU", "REU", "AU"]
+    dims = [(80,100), (0,2), (0,2), (0,1), (0,10), (0,5), (analysis.poses_df['analysis_total_score_q25'].min(), analysis.poses_df['analysis_total_score_q25'].max()), (analysis.poses_df['analysis_interaction_energy_q25'].min(), analysis.poses_df['analysis_interaction_energy_q25'].max()), (analysis.poses_df['analysis_sap_score_q25'].min(), analysis.poses_df['analysis_sap_score_q25'].max())]
     _ = plots.violinplot_multiple_cols(analysis.poses_df, cols=cols, titles=titles, y_labels=y_labels, dims=dims, out_path=os.path.join(plot_path, "analysis.png"))
+
+    # save reduced scoretable:
+    analysis.poses_df[[x for x in analysis.poses_df.columns if "perres" not in x]].to_json(analysis.scorefile)
 
 
 
