@@ -1002,6 +1002,9 @@ def main(args):
     coupled_moves.poses_df = pd.concat([df.sort_values("af2_esm_combined_catres_sitescore", ascending=False).head(args.max_output_per_backbone) for input_pdb, df in coupled_moves.poses_df.groupby("input_description")]).reset_index(drop=True)
     print(f'{len(coupled_moves.poses_df.index)} poses passed all filters.')
 
+    ################# Reindex poses before output #################################
+    coupled_moves.reindex_poses(out_dir="cm_reindexed", remove_layers=2, keep_layers=True)
+
     #create output directory
     resultsdir = os.path.join(args.output_dir, 'results/')
     os.makedirs(resultsdir, exist_ok=True)
@@ -1068,6 +1071,9 @@ if __name__ == "__main__":
     argparser.add_argument("--mpnn_max_output", type=float, default=30, help="maximum number of mpnn sequences per relaxed variant that should be passed on for structure prediction (ranked by global score)")
     argparser.add_argument("--plddt_cutoff", type=float, default=80, help="plddt cutoff for predictions that should be passed to the next round of coupled moves refinement")
     argparser.add_argument("--combined_sitescore_cutoff", type=float, default=0.05, help="Combined ESM & AF2 sitescore cutoff for output PDBs.")
+
+    # docking options
+    argparser.add_argument("--run_docking", default="False", type=str, help="Do you want to start a docking run with your final coupled moves outputs?")
 
     args = argparser.parse_args()
 
