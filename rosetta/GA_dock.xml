@@ -38,7 +38,7 @@
 	<MOVERS>
                 <RunSimpleMetrics name="calc_proteinscores" metrics="sapscore,core_interaction_fa_atr,core_res_count,total_res_count" />
 		<PyMOLMover name="pmm" keep_history="1" />
-		<GALigandDock name="dock" runmode="VSH" scorefxn="dockscore" scorefxn_relax="relaxscore" />
+		<GALigandDock name="dock" runmode="VSH" scorefxn="dockscore" scorefxn_relax="relaxscore" nativepdb="%%native%%" />
 		<InterfaceScoreCalculator name="RMSD_IF_energy" chains="A,%%ligchain%%" scorefxn="beta_genpot" />
 	</MOVERS>
 	<PROTOCOLS>
