@@ -310,6 +310,7 @@ def prepare_coupled_moves_relax_mpnn(output_dir, working_dir, cm_resultsdir, pos
 def convert_af2_perresidue_plddt_to_list(df, perresidue_plddt_column):
     perresidue_plddts = df[perresidue_plddt_column].to_list()
     print(type(perresidue_plddts[0]))
+    print(perresidue_plddts[0])
     perresidue_plddts = [list(i.values()) for i in perresidue_plddts]
     return perresidue_plddts
 
@@ -996,19 +997,22 @@ def main(args):
     coupled_moves.poses_df['af2_perresidue_plddt_list'] = convert_af2_perresidue_plddt_to_list(coupled_moves.poses_df, 'cm_predictions_af2_top_plddt_list')
     coupled_moves = update_sitescore_with_bb_plddts(coupled_moves, 'post_cm_attn_catres_site_score', 'af2_perresidue_plddt_list', 'fixed_residues', f"post_cm_attn")
 
-    # if option is set, dock:
-    if args.run_docking.lower() == "true":
-        # add ligand:
-        lig_poses = coupled_moves.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix="docking_lig_poses")
-        docking_options = f"-parser:protocol {args.docking_protocol} -parser:script_vars ligchain={args.ligand_chain}"
-        docked_poses = rosetta_scripts_and_mean(coupled_moves, prefix="final_dock", n=15, options=docking_options, pose_options=None, filter_scoreterm="final_dock_dG", scoreterms=None)
-
     #filter output
     coupled_moves.poses_df['af2_esm_combined_catres_sitescore'] = coupled_moves.poses_df["post_cm_attn_sc_bb_site_score"] * coupled_moves.poses_df[f"esm_catres_site_score"]
     coupled_moves.poses_df = coupled_moves.poses_df[coupled_moves.poses_df['af2_esm_combined_catres_sitescore'] >= args.combined_sitescore_cutoff]
     print([row['input_description'] for i, row in coupled_moves.poses_df.iterrows()])
     coupled_moves.poses_df = pd.concat([df.sort_values("af2_esm_combined_catres_sitescore", ascending=False).head(args.max_output_per_backbone) for input_pdb, df in coupled_moves.poses_df.groupby("input_description")]).reset_index(drop=True)
     print(f'{len(coupled_moves.poses_df.index)} poses passed all filters.')
+
+    # if option is set, dock:
+    if args.run_docking.lower() == "true":
+        # add ligand:
+        stats_scoreterms = ["final_dock_dG", "final_dock_total_score", "final_dock_lig_rms", f"final_dock_interface_delta_{args.ligand_chain}", "final_dock_fa_atr"]
+
+        lig_poses = coupled_moves.add_ligand_from_ref(ref_col="updated_reference_frags_location", ref_motif="motif_residues", target_motif="motif_residues", lig_chain=args.ligand_chain, prefix="docking_lig_poses")
+        docking_options = f"-parser:protocol {args.docking_protocol}"
+        docking_pose_opts = [f"-parser:script_vars native={pose} ligchain={args.ligand_chain}" for pose in coupled_moves.poses_df["poses"].to_list()]
+        docked_poses = rosetta_scripts_and_mean(coupled_moves, prefix="final_dock", n=15, options=docking_options, pose_options=docking_pose_opts, filter_scoreterm="final_dock_lig_rms", scoreterms=stats_scoreterms, min_scoreterms=stats_scoreterms, std_scoreterms=stats_scoreterms)
 
     ################# Reindex poses before output #################################
     coupled_moves.reindex_poses(out_dir="cm_reindexed", remove_layers=2, keep_layers=True)
