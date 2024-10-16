@@ -1,0 +1,53 @@
+<ROSETTASCRIPTS>
+	This script is supposed to be run after sequence generation with ProteinMPNN.
+	It threads a sequence onto the input protein backbone (That you have to specify), then relaxes it and calculates a lot of metrics.
+	<SCOREFXNS>
+		<ScoreFunction name="beta" weights="beta"/>
+  		<ScoreFunction name="relaxscore" weights="beta_cst"/>
+	</SCOREFXNS>
+	<RESIDUE_SELECTORS>
+		Index name="motif" resnums="%%motif_idx%%" error_on_out_of_bounds_index="false"/>	
+		<Layer name="core_res" select_core="true" />
+		<Layer name="surface_res" select_surface="true" />
+		<Not name="not_surface_res" selector="surface_res" />
+	</RESIDUE_SELECTORS>
+	<TASKOPERATIONS>
+	</TASKOPERATIONS>
+	<MOVE_MAP_FACTORIES>
+	</MOVE_MAP_FACTORIES>
+	<SIMPLE_METRICS>
+		<RMSDMetric name="bb_heavy_rmsd" custom_type="bb_heavy" rmsd_type="rmsd_protein_bb_heavy" reference_name="start_pose" super="true"/>
+		<RMSDMetric name="bb_ca_rmsd" custom_type="bb_ca" rmsd_type="rmsd_protein_bb_ca" reference_name="start_pose" super="true"/>
+		<SequenceMetric name="core_aminoacids" residue_selector="core_res" custom_type="core_" />
+		<SequenceMetric name="surface_aminoacids" residue_selector="surface_res" custom_type="surface" />
+	</SIMPLE_METRICS>
+	<FILTERS>
+		<PackStat name="packstat" threshold="0" repeats="5" />
+		<ExposedHydrophobics name="exposed_hydrophobics" threshold="-1" />
+		<NetCharge name="netcharge_total" />
+	</FILTERS>
+	<MOVERS>
+		<VirtualRoot name="set_virtual_root" />
+		<AddConstraints name="add_bb_ca_constraints" >
+			<CoordinateConstraintGenerator name="set_bb_ca_cst" native="false" ca_only="true" />
+		</AddConstraints>
+		<SavePoseMover name="save_start_pose" restore_pose="0" reference_name="start_pose" />
+		<FastRelax name="fr" scorefxn="relaxscore" />
+		<PyMOLMover name="pmm" keep_history="1" />
+		<SimpleThreadingMover name="thread_sequence" pack_neighbors="false" start_position="1" thread_sequence="%%seq%%" scorefxn="beta" pack_rounds="1" />
+		<RunSimpleMetrics name="rmsd_metrics" metrics="bb_heavy_rmsd,bb_ca_rmsd" />
+		<RunSimpleMetrics name="sequence_metrics" metrics="core_aminoacids,surface_aminoacids" />
+	</MOVERS>
+	<PROTOCOLS>
+		<Add mover_name="save_start_pose" />
+		<Add mover_name="set_virtual_root" />
+		<Add mover_name="add_bb_ca_constraints" />
+		<Add mover_name="thread_sequence" />
+		<Add mover_name="fr" />
+		<Add mover_name="rmsd_metrics" />
+		<Add filter_name="packstat" />
+		<Add filter_name="exposed_hydrophobics" />
+		<Add filter_name="netcharge_total" />
+	</PROTOCOLS>
+	<OUTPUT scorefxn="beta" />
+</ROSETTASCRIPTS>
